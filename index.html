@@ -306,6 +306,10 @@ document.addEventListener('keydown',e=>{if(e.key==='F11'){e.preventDefault();tog
 const PI=Math.PI, TILE=32, RW=100, RH=20;
 const HERO_Y_LIMIT=RH*TILE*.38;   // |y| máximo al que puede llegar el héroe (mismo límite que el clamp de movimiento)
 const ORB_SLIDE_SPEED=170;        // px/s a la que un orbe fuera de alcance se desliza hacia el borde más cercano
+const ORB_PICKUP_R=16, BONE_PICKUP_R=24;  // radio base de recogida de orbes de XP y de huesos (Yoko)
+const PICKUP_MAX=5;                       // niveles máximos de la mejora RECOLECCIÓN
+// Radio de recogida con la mejora RECOLECCIÓN: +50% del radio base por nivel
+function pickupRadius(base){ return base*(1+.5*((G.p&&G.p.up.pickupLevel)||0)); }
 const rf=(lo,hi)=>lo+(hi-lo)*Math.random();
 const ri=(lo,hi)=>lo+Math.floor(Math.random()*(hi-lo+1));
 // Velocidad de movimiento actual del héroe (base + mejoras + bonus de FURIA/VELOZ). La usa Lilith para no dejarse escapar.
@@ -1146,7 +1150,7 @@ function updateBones(dt){
     b.life-=dt; b.bob+=dt*2;
     if(b.life<=0){ G.bones.splice(i,1); continue; }
     const d=hyp(b.x-p.x,b.y-p.y);
-    if(d<24){
+    if(d<pickupRadius(BONE_PICKUP_R)){
       // Desenterrar — efecto aleatorio
       const roll=Math.random();
       if(roll<0.34){
@@ -1772,6 +1776,16 @@ function buildPool(){
     {title:'VAMPIRO',        desc:'+1.5 HP por enemigo',        t:'',      apply(){p.up.lifesteal=(p.up.lifesteal||0)+1.5}},
     {title:'ARMADURA',       desc:'-20% daño recibido',         t:'',      apply(){p.up.armor=(p.up.armor||0)+.2}},
     {title:'GANANCIA XP',        desc:'+50% XP de enemigos',        t:'xp-t',  apply(){p.up.xpm*=1.5}},
+    (()=>{
+      const cur=p.up.pickupLevel||0;
+      return {
+        title:'RECOLECCIÓN'+(cur>0?` Nv.${cur+1}`:''),
+        desc:'+50% rango para recoger orbes de XP'+(p.yoko?' y huesos':''),
+        t:'xp-t',
+        apply(){ p.up.pickupLevel=Math.min(PICKUP_MAX,(p.up.pickupLevel||0)+1); },
+        hide(){ return (p.up.pickupLevel||0)>=PICKUP_MAX; }
+      };
+    })(),
     {title:'CRÍTICO+',       desc:'+8% prob. golpe crítico',    t:'crit-t',apply(){p.up.critChance=Math.min(1.0,p.up.critChance+.08)},hide(){return p.up.critChance>=1.0}},
     {title:'GOLPE×',         desc:'+0.5× daño crítico',         t:'crit-t',apply(){p.up.critMult+=.5}},
     (()=>{
@@ -2713,9 +2727,9 @@ function update(dt){
       const dy2=targetY-o.y, step=ORB_SLIDE_SPEED*dt;
       o.y=Math.abs(dy2)<=step?targetY:o.y+Math.sign(dy2)*step;
     }
-    const d=hyp(p.x-o.x,p.y-o.y);
-    if(d<16||o.life<=0){
-      if(d<16){p.xp+=Math.round(o.val*p.up.xpm);sndOrb();while(p.xp>=p.xpN)triggerLvlUp();}
+    const d=hyp(p.x-o.x,p.y-o.y), pr=pickupRadius(ORB_PICKUP_R);
+    if(d<pr||o.life<=0){
+      if(d<pr){p.xp+=Math.round(o.val*p.up.xpm);sndOrb();while(p.xp>=p.xpN)triggerLvlUp();}
       G.orbs.splice(i,1);
     }
   }
@@ -4788,6 +4802,7 @@ function updateUpgradesPanel(){
   if(up.multishot>1) add('➳','MULTI','x'+(up.multishot),'epic');
   // Proj speed
   if((up.lightningLevel||0)>0) add('⚡','RAYO','Nv.'+up.lightningLevel,'epic');
+  if((up.pickupLevel||0)>0) add('🧲','RECOLEC.','Nv.'+up.pickupLevel,'common');
   // Necro
   if(p.necro){
     if(up.maxSkeletons>2) add('💀','MUERTOS',up.maxSkeletons,'rare');
