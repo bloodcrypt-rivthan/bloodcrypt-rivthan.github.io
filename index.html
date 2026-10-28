@@ -253,6 +253,7 @@ canvas{display:block}
       <div class="char-dot" onclick="charGoTo(1)"></div>
       <div class="char-dot" onclick="charGoTo(2)"></div>
       <div class="char-dot" onclick="charGoTo(3)"></div>
+      <div class="char-dot" onclick="charGoTo(4)"></div>
     </div>
   </div>
   <button class="start-btn" onclick="startGame()">▶  INICIAR PARTIDA</button>
@@ -329,6 +330,7 @@ const CHARS=[
   {name:'MAGO',      hp:80, atk:25,spd:170,range:230,rate:.5, melee:false,   col:'#cc44ff',sc:'#661188',mage:true},
   {name:'NIGROMANTE',hp:90, atk:20,spd:120,range:100,rate:1.2,melee:false,  col:'#44ffaa',sc:'#116644',necro:true},
   {name:'YOKO',      hp:120,atk:40,spd:155,range:50, rate:1.4,melee:false,   col:'#d49a5a',sc:'#8a5a2e',yoko:true},
+  {name:'ARQUERO',   hp:95, atk:22,spd:165,range:260,rate:.55,melee:false,  col:'#6fbf4a',sc:'#2d5a1e',archer:true},
 ];
 const ETYPES=[
   {name:'bat',     hp:18,  atk:8,  spd:90,  col:'#9955ee',sc:'#4411aa',sz:11,xp:4},
@@ -426,7 +428,7 @@ const CHAR_DATA = [
     name:'CABALLERO', role:'GUERRERO · CUERPO A CUERPO',
     desc:'Guerrero cuerpo a cuerpo con alta salud. Su ataque golpea a todos los enemigos en radio. Ideal para sobrevivir sin pensar mucho.',
     hp:150, atk:35, spd:130, rng:62,
-    hpMax:150, atkMax:50, spdMax:200, rngMax:230,
+    hpMax:150, atkMax:50, spdMax:200, rngMax:260,
     col:'#4a9eff', sc:'#1a4499',
     statCols:['#c0392b','#e67e22','#3498db','#9b59b6']
   },
@@ -434,7 +436,7 @@ const CHAR_DATA = [
     name:'MAGO', role:'MAGO · A DISTANCIA',
     desc:'Lanza proyectiles a larga distancia. Frágil pero devastador. Gana multishot con upgrades para arrasar hordas enteras.',
     hp:80, atk:25, spd:170, rng:230,
-    hpMax:150, atkMax:50, spdMax:200, rngMax:230,
+    hpMax:150, atkMax:50, spdMax:200, rngMax:260,
     col:'#cc44ff', sc:'#661188',
     statCols:['#c0392b','#e67e22','#3498db','#9b59b6']
   },
@@ -442,7 +444,7 @@ const CHAR_DATA = [
     name:'NIGROMANTE', role:'INVOCADOR · HÍBRIDO',
     desc:'Invoca esqueletos cada 8s que luchan por él. Debil solo pero escala exponencialmente con el nivel.',
     hp:90, atk:20, spd:120, rng:100,
-    hpMax:150, atkMax:50, spdMax:200, rngMax:230,
+    hpMax:150, atkMax:50, spdMax:200, rngMax:260,
     col:'#44ffaa', sc:'#116644',
     statCols:['#c0392b','#e67e22','#3498db','#9b59b6']
   },
@@ -450,8 +452,16 @@ const CHAR_DATA = [
     name:'YOKO', role:'EMBESTIDOR · ARIETE',
     desc:'Embiste en línea recta atravesando enemigos. Entierra huesos al rematar, que al desenterrarlos dan curación, daño extra o velocidad al azar.',
     hp:120, atk:40, spd:155, rng:50,
-    hpMax:150, atkMax:50, spdMax:200, rngMax:230,
+    hpMax:150, atkMax:50, spdMax:200, rngMax:260,
     col:'#d49a5a', sc:'#8a5a2e',
+    statCols:['#c0392b','#e67e22','#3498db','#9b59b6']
+  },
+  {
+    name:'ARQUERO', role:'CAZADOR · A DISTANCIA',
+    desc:'Dispara flechas rápidas desde lejos, con crítico alto. Sus mejoras le permiten atravesar enemigos y rodearse de shurikens.',
+    hp:95, atk:22, spd:165, rng:260,
+    hpMax:150, atkMax:50, spdMax:200, rngMax:260,
+    col:'#6fbf4a', sc:'#2d5a1e',
     statCols:['#c0392b','#e67e22','#3498db','#9b59b6']
   },
 ];
@@ -555,7 +565,7 @@ function startPreview(){
     const fakeP = {
       col: d.col, sc: d.sc,
       dmgF: 0, animT: _previewT,
-      melee: selChar===0, necro: selChar===2, yoko: selChar===3,
+      melee: selChar===0, necro: selChar===2, yoko: selChar===3, archer: selChar===4,
       charging: selChar===3 && Math.sin(_previewT*0.8)>0.5, // embiste cíclicamente en el preview
       facingAng: 0, walkPhase: _previewT*8,
       chargeVx: 80, chargeVy: 0,
@@ -565,6 +575,7 @@ function startPreview(){
       if(selChar===0)      drawKnight(cx, cy+bob, fakeP);
       else if(selChar===1) drawMage(cx, cy+bob, fakeP);
       else if(selChar===2) drawNecro(cx, cy+bob, fakeP);
+      else if(selChar===4) drawArcher(cx, cy+bob, fakeP);
       else                 drawYoko(cx, cy+bob, fakeP);
     } catch(e){ console.warn('Preview draw error:', e); }
     ctx = _ctxBackup; // restaurar siempre
@@ -650,6 +661,7 @@ function startGame(){
   document.getElementById('crit-row').style.display='none';
   document.getElementById('bloodlust-row').style.display='none';
   document.getElementById('bone-panel').style.display='none';
+  G.shurAng=0; G.shurPts=[];
   dbgSyncRerollBtn();
   paused=false; initG();
   if(raf) cancelAnimationFrame(raf);
@@ -664,11 +676,11 @@ function initG(){
     p:{x:0,y:0,hp:ch.hp,mhp:ch.hp,atk:ch.atk,spd:ch.spd,range:ch.range,rate:ch.rate,
        atkt:0,melee:ch.melee,col:ch.col,sc:ch.sc,name:ch.name,
        invT:0,dmgF:0,xp:0,xpN:20,lv:1,animT:0,walkPhase:0,sprAnim:'idle',sprFrame:0,sprFrameT:0,sprDead:false,
-       up:{atk:0,regen:0,spd:0,rng:1,rate:0,xpm:1,critChance:.05,critMult:2.0,spectralLevel:1},
+       up:{atk:0,regen:0,spd:0,rng:1,rate:0,xpm:1,critChance:ch.archer?.15:.05,critMult:2.0,spectralLevel:1},
        charging:false,chargeT:0,chargeVx:0,chargeVy:0,chargeHit:new Set(),chargeDmgBonus:0,facingAng:0,
        chargeExtraUsed:false,
        bloodlustActive:false,bloodlustT:0,bloodlustCD:BLOODLUST_COOLDOWN,
-       necro:ch.necro||false, yoko:ch.yoko||false, mage:ch.mage||false},
+       necro:ch.necro||false, yoko:ch.yoko||false, mage:ch.mage||false, archer:ch.archer||false},
     enemies:[],projs:[],parts:[],orbs:[],meleeEff:[],dmgNums:[],bloodSplats:[]};
   document.getElementById('char-name').textContent=ch.name+' · LV ';
   document.getElementById('char-name').appendChild(document.createTextNode(''));
@@ -806,6 +818,71 @@ function doShoot(){
       sz:isCrit?7:5,alive:true,trail:[]});
   });
   triggerSprAttack(p);
+}
+// ─── ARQUERO ──────────────────────────────────────────────────────────────────
+const ARROW_SPEED=520, ARROW_PIERCE_DECAY=.85;   // las flechas son rápidas; cada enemigo atravesado resta 15% de daño
+const PIERCE_MAX=4;
+const SHURIKEN_MAX=5, SHURIKEN_RADIUS=58, SHURIKEN_SPIN=3.4, SHURIKEN_HIT_R=8, SHURIKEN_HIT_CD=.45;
+function doArcherShoot(){
+  const p=G.p, range=p.range*p.up.rng;
+  const alive=G.enemies.filter(e=>e.alive);
+  if(G.bossAlive && G.boss && G.boss.alive) alive.push(G.boss);
+  if(!alive.length) return;
+  alive.sort((a,b)=>hyp(a.x-p.x,a.y-p.y)-hyp(b.x-p.x,b.y-p.y));
+  const target=alive.find(e=>hyp(e.x-p.x,e.y-p.y)<=range+e.sz);
+  if(!target) return;
+  const len=hyp(target.x-p.x,target.y-p.y)||1;
+  const{dmg,isCrit}=calcDmg(p.atk+p.up.atk);
+  p.facingLeft=target.x<p.x; // mira hacia donde dispara
+  sndArrow();
+  G.projs.push({x:p.x,y:p.y-8,
+    vx:(target.x-p.x)/len*ARROW_SPEED, vy:(target.y-p.y)/len*ARROW_SPEED,
+    dmg,isCrit,range,tr:0,col:'#d9c27a',sz:isCrit?6:4,alive:true,trail:[],
+    arrow:true, pierceLeft:p.up.pierceLevel||0, pierceDecay:ARROW_PIERCE_DECAY, hit:new Set()});
+  triggerSprAttack(p);
+}
+// Distancia de un punto (px,py) al segmento (ax,ay)-(bx,by): colisión "barrida" para flechas rápidas (sin efecto túnel)
+function segDist(px,py,ax,ay,bx,by){
+  const dx=bx-ax, dy=by-ay, l2=dx*dx+dy*dy;
+  let t=l2?((px-ax)*dx+(py-ay)*dy)/l2:0; t=Math.max(0,Math.min(1,t));
+  return hyp(px-(ax+t*dx), py-(ay+t*dy));
+}
+let lastArrowSndT=0, lastShurSndT=0;
+function sndArrow(){
+  const now=performance.now(); if(now-lastArrowSndT<40) return; lastArrowSndT=now;
+  playNoise({filterFreq:2600,filterType:'bandpass',Q:.8,vol:.12,dur:.09,decay:.08});
+  playTone({type:'triangle',freq:760,freq2:300,dur:.07,vol:.10,attack:.002});
+}
+function sndShuriken(){
+  const now=performance.now(); if(now-lastShurSndT<80) return; lastShurSndT=now;
+  playTone({type:'triangle',freq:1900,freq2:1200,dur:.06,vol:.10,attack:.001});
+}
+// Shurikens orbitales: giran alrededor del héroe y dañan al contacto (cada enemigo, como máximo cada SHURIKEN_HIT_CD s)
+function updateShurikens(dt){
+  const p=G.p, lvl=p.up.shurikenLevel||0;
+  if(lvl<=0){ G.shurPts=[]; return; }
+  G.shurAng=(G.shurAng||0)+dt*SHURIKEN_SPIN;
+  const targets=G.enemies.filter(e=>e.alive);
+  if(G.bossAlive && G.boss && G.boss.alive) targets.push(G.boss);
+  targets.forEach(t=>{ if(t._shurT>0) t._shurT-=dt; });
+  const base=(p.atk+p.up.atk)*.7*(1+.2*(lvl-1));
+  G.shurPts=[];
+  for(let k=0;k<lvl;k++){
+    const ang=G.shurAng+k*PI*2/lvl;
+    const x=p.x+Math.cos(ang)*SHURIKEN_RADIUS, y=p.y+Math.sin(ang)*SHURIKEN_RADIUS;
+    G.shurPts.push({x,y});
+    for(const t of targets){
+      if(!t.alive||t._shurT>0) continue;
+      if(hyp(x-t.x,y-t.y)>=t.sz+SHURIKEN_HIT_R) continue;
+      const{dmg,isCrit}=calcDmg(base);
+      t.hp-=dmg; t.fl=.12; t._shurT=SHURIKEN_HIT_CD;
+      if(isCrit){G.totalCrits++;spawnDmgNum(t.x,t.y-t.sz*2,dmg,true);}
+      spParts(t.x,t.y,'#cfd8e3',isCrit?8:4);
+      spawnBlood(t.x,t.y,isCrit?8:4,'#aa1111');
+      sndShuriken();
+      if(t.hp<=0){ if(t===G.boss) killBoss(); else killE(t); }
+    }
+  }
 }
 function killBoss(){
   const boss=G.boss, p=G.p;
@@ -1780,7 +1857,7 @@ function buildPool(){
       const cur=p.up.pickupLevel||0;
       return {
         title:'RECOLECCIÓN'+(cur>0?` Nv.${cur+1}`:''),
-        desc:'+50% rango para recoger orbes de XP'+(p.yoko?' y huesos':''),
+        desc:'+150% rango para recoger orbes de XP'+(p.yoko?' y huesos':''),
         t:'xp-t',
         apply(){ p.up.pickupLevel=Math.min(PICKUP_MAX,(p.up.pickupLevel||0)+1); },
         hide(){ return (p.up.pickupLevel||0)>=PICKUP_MAX; }
@@ -1829,6 +1906,25 @@ function buildPool(){
       {title:'FURIA',        desc:'Cada kill +0.8s de velocidad', t:'', apply(){p.up.furyStacks=(p.up.furyStacks||0)+1}},
       {title:'DOBLE HUESO',  desc:'Los huesos duran el doble de tiempo', t:'', apply(){p.up.boneDuration=(p.up.boneDuration||1)*2}},
       {title:'VAMPIRO CARGA',desc:'+5 HP por enemigo golpeado en carga', t:'', apply(){p.up.chargeLifesteal=(p.up.chargeLifesteal||0)+5}},
+    ] : p.archer ? [
+      (()=>{
+        const cur=p.up.pierceLevel||0;
+        return {
+          title:'PENETRANTES'+(cur>0?` Nv.${cur+1}`:''),
+          desc:cur===0?'Las flechas atraviesan 1 enemigo (−15% daño por enemigo)':'Las flechas atraviesan 1 enemigo más',
+          t:'', apply(){ p.up.pierceLevel=Math.min(PIERCE_MAX,(p.up.pierceLevel||0)+1); },
+          hide(){ return (p.up.pierceLevel||0)>=PIERCE_MAX; }
+        };
+      })(),
+      (()=>{
+        const cur=p.up.shurikenLevel||0;
+        return {
+          title:'SHURIKENS'+(cur>0?` Nv.${cur+1}`:''),
+          desc:cur===0?'Un shuriken gira a tu alrededor dañando a quien toque':'+1 shuriken orbital · +20% de daño',
+          t:'', apply(){ p.up.shurikenLevel=Math.min(SHURIKEN_MAX,(p.up.shurikenLevel||0)+1); },
+          hide(){ return (p.up.shurikenLevel||0)>=SHURIKEN_MAX; }
+        };
+      })(),
     ] : [
       {title:'MULTIDISPARO', desc:'Dispara a 1 enemigo extra',  t:'', apply(){p.up.multishot=(p.up.multishot||1)+1}},
     ]),
@@ -2590,8 +2686,9 @@ function update(dt){
 
   // Attack
   p.atkt-=dt;
-  if(p.atkt<=0){p.atkt=Math.max(.1,p.rate-p.up.rate); p.melee?doMelee():(p.necro?doNecroAttack():(p.yoko?doYokoCharge():doShoot()));}
+  if(p.atkt<=0){p.atkt=Math.max(.1,p.rate-p.up.rate); p.melee?doMelee():(p.necro?doNecroAttack():(p.yoko?doYokoCharge():(p.archer?doArcherShoot():doShoot())));}
   if(p.necro) updateSkeletons(dt);
+  updateShurikens(dt);
   if(p.necro) updateThralls(dt);
   if(p.yoko) updateBloodlust(dt);
   if(p.yoko) updateYokoCharge(dt);
@@ -2604,28 +2701,36 @@ function update(dt){
     if(!pr.alive){G.projs.splice(i,1);continue;}
     pr.trail.push({x:pr.x,y:pr.y});
     if(pr.trail.length>8) pr.trail.shift();
+    const ox=pr.x, oy=pr.y;
     pr.x+=pr.vx*dt; pr.y+=pr.vy*dt; pr.tr+=hyp(pr.vx,pr.vy)*dt;
     if(pr.tr>pr.range){pr.alive=false;continue;}
     for(const e of G.enemies){
       if(!e.alive)continue;
-      if(hyp(pr.x-e.x,pr.y-e.y)<e.sz+pr.sz){
+      if(pr.hit && pr.hit.has(e)) continue;
+      const touched = pr.arrow ? segDist(e.x,e.y,ox,oy,pr.x,pr.y)<e.sz+pr.sz : hyp(pr.x-e.x,pr.y-e.y)<e.sz+pr.sz;
+      if(touched){
         e.hp-=pr.dmg; e.fl=.15;
         if(pr.isCrit){G.totalCrits++;spawnDmgNum(e.x,e.y-e.sz*2,pr.dmg,true);sndCrit();}
         spawnBlood(e.x,e.y,pr.isCrit?14:8,pr.isCrit?'#ff6600':'#aa1111');
-        spParts(e.x,e.y,pr.isCrit?'#ff8800':'#cc44ff',pr.isCrit?10:6);
-        pr.alive=false; if(e.hp<=0) killE(e); break;
+        spParts(e.x,e.y,pr.isCrit?'#ff8800':(pr.arrow?'#d9c27a':'#cc44ff'),pr.isCrit?10:6);
+        if(e.hp<=0) killE(e);
+        if(pr.pierceLeft>0){ pr.pierceLeft--; pr.hit.add(e); pr.dmg*=pr.pierceDecay; }   // la flecha sigue de largo
+        else { pr.alive=false; break; }
       }
     }
     // Proyectil vs Boss
-    if(pr.alive && G.bossAlive && G.boss && G.boss.alive){
+    if(pr.alive && G.bossAlive && G.boss && G.boss.alive && !(pr.hit && pr.hit.has(G.boss))){
       const boss=G.boss;
-      if(hyp(pr.x-boss.x,pr.y-boss.y)<boss.sz+pr.sz){
+      const touchedB = pr.arrow ? segDist(boss.x,boss.y,ox,oy,pr.x,pr.y)<boss.sz+pr.sz : hyp(pr.x-boss.x,pr.y-boss.y)<boss.sz+pr.sz;
+      if(touchedB){
         boss.hp-=pr.dmg; boss.fl=.10;
         if(pr.isCrit){G.totalCrits++;spawnDmgNum(boss.x,boss.y-boss.sz*2,pr.dmg,true);sndCrit();}
         else{sndBossHit();}
         spawnBlood(boss.x,boss.y,pr.isCrit?16:10,'#c8b8ff');
-        spParts(boss.x,boss.y,pr.isCrit?'#ff8800':'#aa66ff',pr.isCrit?12:7);
-        pr.alive=false; if(boss.hp<=0) killBoss();
+        spParts(boss.x,boss.y,pr.isCrit?'#ff8800':(pr.arrow?'#d9c27a':'#aa66ff'),pr.isCrit?12:7);
+        if(pr.pierceLeft>0){ pr.pierceLeft--; pr.hit.add(boss); pr.dmg*=pr.pierceDecay; }
+        else pr.alive=false;
+        if(boss.hp<=0) killBoss();
       }
     }
   }
@@ -3107,10 +3212,25 @@ function draw(){
     ctx.restore();
   }
 
+  // Shurikens orbitales del Arquero
+  if(G.shurPts && G.shurPts.length){
+    for(const sp of G.shurPts){
+      const hx=sp.x+cx, hy=sp.y+cy;
+      ctx.save(); ctx.translate(hx,hy); ctx.rotate((G.shurAng||0)*7);
+      ctx.shadowColor='#9fb4d0'; ctx.shadowBlur=9;
+      ctx.fillStyle='#d5dbe6'; ctx.strokeStyle='#3b4558'; ctx.lineWidth=1;
+      ctx.beginPath();
+      for(let i=0;i<8;i++){ const r=i%2===0?10:3.6, a=i*PI/4; ctx.lineTo(Math.cos(a)*r,Math.sin(a)*r); }
+      ctx.closePath(); ctx.fill(); ctx.stroke();
+      ctx.fillStyle='#3b4558'; ctx.beginPath(); ctx.arc(0,0,2,0,PI*2); ctx.fill();
+      ctx.restore();
+    }
+  }
+
   // Projectile trails + bullets
   for(const pr of G.projs){
     // Trail
-    for(let i=0;i<pr.trail.length;i++){
+    for(let i=0;i<(pr.arrow?0:pr.trail.length);i++){ // las flechas dibujan su propia estela
       const t=pr.trail[i];
       const sx=t.x+cx,sy=t.y+cy;
       const a=(i/pr.trail.length)*.5;
@@ -3120,6 +3240,28 @@ function draw(){
       ctx.beginPath();ctx.arc(sx,sy,r,0,PI*2);ctx.fill();
     }
     ctx.globalAlpha=1;
+    // Flecha del Arquero
+    if(pr.arrow){
+      const ax=pr.x+cx, ay=pr.y+cy, ang=Math.atan2(pr.vy,pr.vx);
+      ctx.save();
+      // estela corta
+      if(pr.trail.length>1){
+        const t0=pr.trail[Math.max(0,pr.trail.length-4)];
+        ctx.globalAlpha=.35; ctx.strokeStyle=pr.isCrit?'#ffaa33':'#e6dcb4'; ctx.lineWidth=1.5; ctx.lineCap='round';
+        ctx.beginPath(); ctx.moveTo(t0.x+cx,t0.y+cy); ctx.lineTo(ax,ay); ctx.stroke(); ctx.globalAlpha=1;
+      }
+      ctx.translate(ax,ay); ctx.rotate(ang);
+      if(pr.isCrit){ ctx.shadowColor='#ff8800'; ctx.shadowBlur=12; }
+      ctx.strokeStyle='#b8925a'; ctx.lineWidth=2; ctx.lineCap='round';
+      ctx.beginPath(); ctx.moveTo(-11,0); ctx.lineTo(6,0); ctx.stroke();                 // astil
+      ctx.fillStyle=pr.isCrit?'#ffdd66':'#dfe6ee';
+      ctx.beginPath(); ctx.moveTo(11,0); ctx.lineTo(5,-3); ctx.lineTo(5,3); ctx.closePath(); ctx.fill(); // punta
+      ctx.strokeStyle='#8bc34a'; ctx.lineWidth=1.5;                                      // plumas
+      ctx.beginPath(); ctx.moveTo(-11,0); ctx.lineTo(-14,-3); ctx.moveTo(-11,0); ctx.lineTo(-14,3);
+      ctx.moveTo(-8,0); ctx.lineTo(-11,-3); ctx.moveTo(-8,0); ctx.lineTo(-11,3); ctx.stroke();
+      ctx.restore();
+      continue;
+    }
     // Bullet
     const sx=pr.x+cx,sy=pr.y+cy;
     ctx.save();
@@ -4170,6 +4312,7 @@ function drawPlayer(W,H,p){
   if(p.melee)       drawKnight(sx,sy+bob,p);
   else if(p.necro)  drawNecro(sx,sy+bob,p);
   else if(p.yoko)   drawYoko(sx,sy+bob,p);
+  else if(p.archer) drawArcher(sx,sy+bob,p);
   else              drawMage(sx,sy+bob,p);
 
   // HP bar
@@ -4229,6 +4372,40 @@ function drawKnight(sx,sy,p){
     ctx.beginPath(); ctx.ellipse(sx,sy-23+bob,3,4,0,0,PI*2); ctx.fill();
     ctx.shadowBlur=0;
   }
+  ctx.restore();
+}
+
+// Arquero (dibujo provisional por código, hasta tener sus sprites): encapuchado verde con arco y carcaj
+function drawArcher(sx,sy,p){
+  const flash=p.dmgF>0, f=c=>flash?'#ffffff':c;
+  const ph=Math.sin(p.walkPhase||0);
+  ctx.save();
+  ctx.fillStyle='rgba(0,0,0,.35)';
+  ctx.beginPath(); ctx.ellipse(sx,sy+10,11,3.5,0,0,PI*2); ctx.fill();
+  ctx.translate(sx,sy); ctx.scale(p.facingLeft?-1:1,1);
+  // piernas y botas
+  const l1=ph>0?0:1, l2=ph>0?1:0;
+  ctx.fillStyle=f('#3b2a1a'); ctx.fillRect(-6,2+l1,5,9); ctx.fillRect(1,2+l2,5,9);
+  ctx.fillStyle=f('#241810'); ctx.fillRect(-6,9+l1,6,3); ctx.fillRect(1,9+l2,6,3);
+  // carcaj con flechas (a la espalda)
+  ctx.fillStyle=f('#5a3a1e'); ctx.fillRect(-13,-17,5,17);
+  ctx.fillStyle=f('#c8d89a'); ctx.fillRect(-12,-21,1,4); ctx.fillRect(-10,-20,1,3);
+  // túnica y cinturón
+  ctx.fillStyle=f('#2d5a1e'); ctx.beginPath(); ctx.ellipse(0,-6,9,11,0,0,PI*2); ctx.fill();
+  ctx.fillStyle=f('#3f7a2a'); ctx.beginPath(); ctx.ellipse(1,-8,6,8,0,0,PI*2); ctx.fill();
+  ctx.fillStyle=f('#6b4a22'); ctx.fillRect(-9,-3,18,3);
+  // capucha y rostro en sombra
+  ctx.fillStyle=f('#1f4016'); ctx.beginPath(); ctx.ellipse(0,-20,8.5,9.5,0,0,PI*2); ctx.fill();
+  ctx.fillStyle=f('#0c1a0a'); ctx.beginPath(); ctx.ellipse(2,-19,5,5.5,0,0,PI*2); ctx.fill();
+  if(!flash){ ctx.fillStyle='#ffd34d'; ctx.shadowColor='#ffd34d'; ctx.shadowBlur=5; ctx.fillRect(3,-20,2.5,1.6); ctx.shadowBlur=0; }
+  // brazo extendido y arco
+  ctx.fillStyle=f('#2d5a1e'); ctx.fillRect(3,-10,17,3.2);
+  ctx.fillStyle=f('#c9a27a'); ctx.beginPath(); ctx.arc(21,-8.4,2.2,0,PI*2); ctx.fill();
+  ctx.strokeStyle=f('#8a5a2e'); ctx.lineWidth=2.4; ctx.lineCap='round';
+  ctx.beginPath(); ctx.arc(10,-8.4,13,-1.15,1.15); ctx.stroke();
+  const bx=10+13*Math.cos(1.15), by=13*Math.sin(1.15);
+  ctx.strokeStyle='rgba(235,230,210,.85)'; ctx.lineWidth=.9;
+  ctx.beginPath(); ctx.moveTo(bx,-8.4-by); ctx.lineTo(bx,-8.4+by); ctx.stroke();
   ctx.restore();
 }
 
@@ -4803,6 +4980,8 @@ function updateUpgradesPanel(){
   // Proj speed
   if((up.lightningLevel||0)>0) add('⚡','RAYO','Nv.'+up.lightningLevel,'epic');
   if((up.pickupLevel||0)>0) add('🧲','RECOLEC.','Nv.'+up.pickupLevel,'common');
+  if((up.pierceLevel||0)>0) add('➳','PENETR.','Nv.'+up.pierceLevel,'common');
+  if((up.shurikenLevel||0)>0) add('✴','SHURIKEN','Nv.'+up.shurikenLevel,'epic');
   // Necro
   if(p.necro){
     if(up.maxSkeletons>2) add('💀','MUERTOS',up.maxSkeletons,'rare');
