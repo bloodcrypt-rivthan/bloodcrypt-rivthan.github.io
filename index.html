@@ -304,6 +304,8 @@ document.addEventListener('keydown',e=>{if(e.key==='F11'){e.preventDefault();tog
 
 // ─── CONSTANTS ────────────────────────────────────────────────────────────────
 const PI=Math.PI, TILE=32, RW=100, RH=20;
+const HERO_Y_LIMIT=RH*TILE*.38;   // |y| máximo al que puede llegar el héroe (mismo límite que el clamp de movimiento)
+const ORB_SLIDE_SPEED=170;        // px/s a la que un orbe fuera de alcance se desliza hacia el borde más cercano
 const rf=(lo,hi)=>lo+(hi-lo)*Math.random();
 const ri=(lo,hi)=>lo+Math.floor(Math.random()*(hi-lo+1));
 // Velocidad de movimiento actual del héroe (base + mejoras + bonus de FURIA/VELOZ). La usa Lilith para no dejarse escapar.
@@ -2701,16 +2703,17 @@ function update(dt){
     }
   }
 
-  // Orbs – always attracted toward player, speed increases with proximity
+  // Orbes de XP: ya NO se dirigen hacia el héroe; quedan donde cayeron y hay que ir a recogerlos.
+  // Si cayeron fuera de la zona alcanzable (más allá de los muros, donde el héroe no puede entrar),
+  // se deslizan hacia el borde alcanzable más cercano.
   for(let i=G.orbs.length-1;i>=0;i--){
     const o=G.orbs[i]; o.life-=dt; o.pulse+=dt*5;
-    const dx=p.x-o.x, dy=p.y-o.y, d=hyp(dx,dy);
-    if(d>0){
-      // Accelerate as they get closer: min 120 px/s far away, up to 420 px/s up close
-      const speed=120+280*(1-Math.min(1,d/300));
-      o.x+=dx/d*speed*dt;
-      o.y+=dy/d*speed*dt;
+    if(o.y>HERO_Y_LIMIT||o.y<-HERO_Y_LIMIT){
+      const targetY=o.y>0?HERO_Y_LIMIT:-HERO_Y_LIMIT;
+      const dy2=targetY-o.y, step=ORB_SLIDE_SPEED*dt;
+      o.y=Math.abs(dy2)<=step?targetY:o.y+Math.sign(dy2)*step;
     }
+    const d=hyp(p.x-o.x,p.y-o.y);
     if(d<16||o.life<=0){
       if(d<16){p.xp+=Math.round(o.val*p.up.xpm);sndOrb();while(p.xp>=p.xpN)triggerLvlUp();}
       G.orbs.splice(i,1);
