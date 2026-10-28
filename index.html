@@ -1128,9 +1128,11 @@ function updateYokoCharge(dt){
 }
 
 // Hueso enterrado al matar un enemigo durante la embestida
+// Un hueso no recogido se mantiene BONE_SOLID_TIME segundos (×DOBLE HUESO) y luego se desvanece lentamente durante BONE_FADE_TIME
+const BONE_SOLID_TIME=6, BONE_FADE_TIME=2.5;
 function buryBone(x,y){
   if(!G.bones) G.bones=[];
-  const boneLt=30*(G.p.up.boneDuration||1);
+  const boneLt=BONE_SOLID_TIME*(G.p.up.boneDuration||1)+BONE_FADE_TIME;
   G.bones.push({x,y,life:boneLt,ml:boneLt,bob:rf(0,PI*2)});
 }
 
@@ -3035,15 +3037,15 @@ function draw(){
     G.bones.forEach(b=>{
       const sx=b.x+cx, sy=b.y+cy;
       const bobY=Math.sin(b.bob)*2;
-      const warn = b.life<6 ? (0.4+Math.sin(G.time*10)*.3) : 1;
+      const fade = Math.min(1,b.life/BONE_FADE_TIME); // 1 mientras dura, baja lentamente a 0 en la fase final
       ctx.save();
-      ctx.globalAlpha=Math.min(1,b.life/2)*warn;
+      ctx.globalAlpha=fade;
       // Halo dorado
       ctx.shadowColor='#ffcc66'; ctx.shadowBlur=12;
       ctx.globalAlpha*=0.25;
       ctx.fillStyle='#ffcc66';
       ctx.beginPath(); ctx.arc(sx,sy,12,0,PI*2); ctx.fill();
-      ctx.globalAlpha=Math.min(1,b.life/2)*warn;
+      ctx.globalAlpha=fade;
       // Hueso pixelado simple
       ctx.shadowBlur=6;
       ctx.fillStyle='#f0e0c0';
