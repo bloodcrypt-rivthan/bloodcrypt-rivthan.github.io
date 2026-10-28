@@ -308,8 +308,8 @@ const HERO_Y_LIMIT=RH*TILE*.38;   // |y| máximo al que puede llegar el héroe (
 const ORB_SLIDE_SPEED=170;        // px/s a la que un orbe fuera de alcance se desliza hacia el borde más cercano
 const ORB_PICKUP_R=16, BONE_PICKUP_R=24;  // radio base de recogida de orbes de XP y de huesos (Yoko)
 const PICKUP_MAX=5;                       // niveles máximos de la mejora RECOLECCIÓN
-// Radio de recogida con la mejora RECOLECCIÓN: +100% del radio base por nivel
-function pickupRadius(base){ return base*(1+1*((G.p&&G.p.up.pickupLevel)||0)); }
+// Radio de recogida con la mejora RECOLECCIÓN: +150% del radio base por nivel
+function pickupRadius(base){ return base*(1+1.5*((G.p&&G.p.up.pickupLevel)||0)); }
 const rf=(lo,hi)=>lo+(hi-lo)*Math.random();
 const ri=(lo,hi)=>lo+Math.floor(Math.random()*(hi-lo+1));
 // Velocidad de movimiento actual del héroe (base + mejoras + bonus de FURIA/VELOZ). La usa Lilith para no dejarse escapar.
