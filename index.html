@@ -670,7 +670,7 @@ function restartGame(){document.getElementById('gover').style.display='none'; st
 
 function initG(){
   const ch=CHARS[selChar];
-  G={run:true,time:0,kills:0,wave:1,spT:0,spI:2.2,cam:{x:0,y:0},lvlPending:false,totalCrits:0,rerollsLeft:0,furyTimer:0,skeletons:[],summonTimer:0,boss:null,bossAlive:false,bossAnnounce:0,bossSpawned:false,bossProjs:[],eProjs:[],thralls:[],thrallProjs:[],spectralFX:[],lightningFX:[],lightningT:0,shurAng:0,shurPts:[],arrowQueue:[],rains:[],rainArrows:[],rainT:3,traps:[],trapFX:[],trapT:3,bones:[],shake:0,shakeX:0,shakeY:0,lvlUpFlash:0,
+  G={run:true,time:0,kills:0,wave:1,spT:0,spI:2.2,cam:{x:0,y:0},lvlPending:false,totalCrits:0,rerollsLeft:0,furyTimer:0,skeletons:[],summonTimer:0,boss:null,bossAlive:false,bossAnnounce:0,bossSpawned:false,bossProjs:[],eProjs:[],thralls:[],thrallProjs:[],spectralFX:[],lightningFX:[],lightningT:0,shurAng:0,shurPts:[],arrowQueue:[],stealthT:4,invisPos:{x:0,y:0},rains:[],rainArrows:[],rainT:3,traps:[],trapFX:[],trapT:3,bones:[],shake:0,shakeX:0,shakeY:0,lvlUpFlash:0,
     lilith:null,lilithAlive:false,lilithSpawned:false,lilithAnnounce:0,
     p:{x:0,y:0,hp:ch.hp,mhp:ch.hp,atk:ch.atk,spd:ch.spd,range:ch.range,rate:ch.rate,
        atkt:0,melee:ch.melee,col:ch.col,sc:ch.sc,name:ch.name,
@@ -831,7 +831,17 @@ function doArcherShoot(){
   alive.sort((a,b)=>hyp(a.x-p.x,a.y-p.y)-hyp(b.x-p.x,b.y-p.y));
   const target=alive.find(e=>hyp(e.x-p.x,e.y-p.y)<=range+e.sz);
   if(!target) return;
-  const{dmg,isCrit}=calcDmg(p.atk+p.up.atk);
+  let{dmg,isCrit}=calcDmg(p.atk+p.up.atk);
+  // TIRO CERTERO: cada N disparos sale una flecha cargada (más daño, atraviesa todo)
+  let charged=false;
+  const pl=p.up.preciseLevel||0;
+  if(pl>0){
+    p.shotCount=(p.shotCount||0)+1;
+    if(p.shotCount>=PRECISE_BASE_SHOTS-pl){ p.shotCount=0; charged=true; dmg*=3+.5*(pl-1); }
+  }
+  // SIGILO: la primera flecha tras volverse invisible (o hasta 1.5 s después) hace daño extra
+  let ambush=false;
+  if(p.ambush){ ambush=true; p.ambush=false; dmg*=2+.5*(p.up.stealthLevel||1); }
   p.facingLeft=target.x<p.x; // mira hacia donde dispara
   const dir=p.facingLeft?-1:1;
   // Con sprite, la flecha sale desde el arco (adelante y a altura del pecho); sin sprite, desde el héroe
@@ -840,14 +850,15 @@ function doArcherShoot(){
   const len=hyp(target.x-(p.x+ox),target.y-(p.y+oy))||1;
   const proj={x:p.x+ox,y:p.y+oy,
     vx:(target.x-(p.x+ox))/len*ARROW_SPEED, vy:(target.y-(p.y+oy))/len*ARROW_SPEED,
-    dmg,isCrit,range,tr:0,col:'#d9c27a',sz:isCrit?6:4,alive:true,trail:[],
-    arrow:true, pierceLeft:p.up.pierceLevel||0, pierceDecay:ARROW_PIERCE_DECAY, hit:new Set()};
+    dmg,isCrit,range,tr:0,col:'#d9c27a',sz:charged?8:(isCrit?6:4),alive:true,trail:[],
+    arrow:true, pierceLeft:charged?999:(p.up.pierceLevel||0), pierceDecay:charged?1:ARROW_PIERCE_DECAY, hit:new Set(),
+    charged, ambush};
   if(hasSpr){
     // La flecha sale cuando el sprite SUELTA la cuerda (último frame de la animación de ataque)
     const[,count,fps]=SPRITE_CFG.archer.anims.attack;
     if(!G.arrowQueue) G.arrowQueue=[];
     G.arrowQueue.push({t:(count-1)/fps,proj,ox,oy});
-  } else { sndArrow(); G.projs.push(proj); }
+  } else { sndArrow(); if(charged) sndCharged(); G.projs.push(proj); }
   triggerSprAttack(p);
 }
 // Cola de flechas pendientes: sale cada flecha cuando termina su tiempo de preparación
@@ -858,7 +869,7 @@ function updateArrowQueue(dt){
     const q=G.arrowQueue[i]; q.t-=dt;
     if(q.t>0) continue;
     q.proj.x=p.x+q.ox; q.proj.y=p.y+q.oy; // sale desde donde está el arco ahora
-    G.projs.push(q.proj); sndArrow();
+    G.projs.push(q.proj); sndArrow(); if(q.proj.charged) sndCharged();
     G.arrowQueue.splice(i,1);
   }
 }
@@ -1077,6 +1088,56 @@ function drawArcherAir(cx,cy){
       ctx.closePath(); ctx.fill(); ctx.stroke();
       ctx.fillStyle='#3b4558'; ctx.beginPath(); ctx.arc(0,0,2,0,PI*2); ctx.fill();
       ctx.restore();
+    }
+  }
+}
+// ─── ARQUERO · etapa 3: SIGILO, TIRO CERTERO y FLECHA DE VENENO ─────────────────
+const STEALTH_MAX=3, PRECISE_MAX=3, POISON_MAX=3;
+const PRECISE_BASE_SHOTS=7;      // TIRO CERTERO: cada (7 − nivel) disparos → 6, 5, 4
+const POISON_TIME=4, POISON_TICK=.5;
+let lastStealthSndT=0;
+function sndCharged(){ playTone({type:'sawtooth',freq:320,freq2:110,dur:.14,vol:.12,attack:.002}); }
+function sndStealth(){
+  const now=performance.now(); if(now-lastStealthSndT<300) return; lastStealthSndT=now;
+  playTone({type:'sine',freq:600,freq2:180,dur:.35,vol:.12,attack:.01});
+  playNoise({filterFreq:700,filterType:'lowpass',Q:.6,vol:.10,dur:.3,decay:.25});
+}
+// SIGILO: cada cierto tiempo el héroe se vuelve invisible; los enemigos comunes lo pierden (los jefes no se dejan engañar)
+function updateStealth(dt){
+  const p=G.p, lvl=p.up.stealthLevel||0;
+  if(typeof G.stealthT!=='number') G.stealthT=4;
+  if(p.ambushT>0){ p.ambushT-=dt; if(p.ambushT<=0) p.ambush=false; }   // la emboscada dura 1.5 s tras reaparecer
+  if(lvl<=0) return;
+  if(p.invisT>0){
+    p.invisT-=dt;
+    if(p.invisT<=0){ p.invisT=0; p.ambushT=1.5; spParts(p.x,p.y-10,'#aee9a0',8); }
+    return;
+  }
+  G.stealthT-=dt;
+  if(G.stealthT<=0){
+    if(!G.enemies.some(e=>e.alive && hyp(e.x-p.x,e.y-p.y)<450)){ G.stealthT=.5; return; } // sin enemigos cerca, no se gasta
+    p.invisT=2+.7*(lvl-1);
+    p.ambush=true; p.ambushT=0;
+    G.invisPos={x:p.x,y:p.y};
+    G.stealthT=Math.max(7,16-2.5*(lvl-1));
+    spParts(p.x,p.y-10,'#aee9a0',14); sndStealth();
+  }
+}
+// FLECHA DE VENENO: las flechas dejan veneno (daño continuo); no se acumula, renueva duración y conserva el mayor daño
+function applyPoison(t){
+  const lvl=G.p.up.poisonLevel||0; if(lvl<=0||!t||!t.alive) return;
+  const dps=(G.p.atk+G.p.up.atk)*(.25+.08*lvl);
+  t.poisonT=POISON_TIME; t.poisonDps=Math.max(t.poisonDps||0,dps);
+}
+function updatePoison(dt){
+  for(const t of liveTargets()){
+    if(!(t.poisonT>0)) continue;
+    t.poisonT-=dt; t._ptick=(t._ptick||0)-dt;
+    if(t._ptick<=0){
+      t._ptick+=POISON_TICK;
+      t.hp-=t.poisonDps*POISON_TICK;
+      spParts(t.x,t.y-4,'#7bff4a',2);
+      if(t.hp<=0){ if(t===G.boss) killBoss(); else killE(t); }
     }
   }
 }
@@ -2139,6 +2200,33 @@ function buildPool(){
           hide(){ return (p.up.trapLevel||0)>=TRAP_MAX; }
         };
       })(),
+      (()=>{
+        const cur=p.up.stealthLevel||0;
+        return {
+          title:'SIGILO'+(cur>0?` Nv.${cur+1}`:''),
+          desc:cur===0?'Cada cierto tiempo te vuelves invisible: los enemigos te pierden y tu siguiente flecha pega mucho más fuerte':'+duración · +daño de emboscada · se activa más seguido',
+          t:'', apply(){ p.up.stealthLevel=Math.min(STEALTH_MAX,(p.up.stealthLevel||0)+1); },
+          hide(){ return (p.up.stealthLevel||0)>=STEALTH_MAX; }
+        };
+      })(),
+      (()=>{
+        const cur=p.up.preciseLevel||0;
+        return {
+          title:'TIRO CERTERO'+(cur>0?` Nv.${cur+1}`:''),
+          desc:cur===0?'Cada 6 disparos sale una flecha cargada: triple daño y atraviesa a todos':'La flecha cargada sale antes y pega más fuerte',
+          t:'', apply(){ p.up.preciseLevel=Math.min(PRECISE_MAX,(p.up.preciseLevel||0)+1); },
+          hide(){ return (p.up.preciseLevel||0)>=PRECISE_MAX; }
+        };
+      })(),
+      (()=>{
+        const cur=p.up.poisonLevel||0;
+        return {
+          title:'FLECHA DE VENENO'+(cur>0?` Nv.${cur+1}`:''),
+          desc:cur===0?'Tus flechas envenenan: daño continuo durante 4 segundos':'+daño de veneno por segundo',
+          t:'', apply(){ p.up.poisonLevel=Math.min(POISON_MAX,(p.up.poisonLevel||0)+1); },
+          hide(){ return (p.up.poisonLevel||0)>=POISON_MAX; }
+        };
+      })(),
     ] : [
       {title:'MULTIDISPARO', desc:'Dispara a 1 enemigo extra',  t:'', apply(){p.up.multishot=(p.up.multishot||1)+1}},
     ]),
@@ -2919,6 +3007,8 @@ function update(dt){
   updateShurikens(dt);
   updateRain(dt);
   updateTraps(dt);
+  updateStealth(dt);
+  updatePoison(dt);
   if(p.necro) updateThralls(dt);
   if(p.yoko) updateBloodlust(dt);
   if(p.yoko) updateYokoCharge(dt);
@@ -2944,6 +3034,7 @@ function update(dt){
         spawnBlood(e.x,e.y,pr.isCrit?14:8,pr.isCrit?'#ff6600':'#aa1111');
         spParts(e.x,e.y,pr.isCrit?'#ff8800':(pr.arrow?'#d9c27a':'#cc44ff'),pr.isCrit?10:6);
         if(e.hp<=0) killE(e);
+        if(pr.arrow) applyPoison(e);
         if(pr.pierceLeft>0){ pr.pierceLeft--; pr.hit.add(e); pr.dmg*=pr.pierceDecay; }   // la flecha sigue de largo
         else { pr.alive=false; break; }
       }
@@ -2958,6 +3049,7 @@ function update(dt){
         else{sndBossHit();}
         spawnBlood(boss.x,boss.y,pr.isCrit?16:10,'#c8b8ff');
         spParts(boss.x,boss.y,pr.isCrit?'#ff8800':(pr.arrow?'#d9c27a':'#aa66ff'),pr.isCrit?12:7);
+        if(pr.arrow) applyPoison(boss);
         if(pr.pierceLeft>0){ pr.pierceLeft--; pr.hit.add(boss); pr.dmg*=pr.pierceDecay; }
         else pr.alive=false;
         if(boss.hp<=0) killBoss();
@@ -2975,13 +3067,16 @@ function update(dt){
       if(e.baseSpd===undefined) e.baseSpd=e.spd;
       e.slowT-=dt; e.spd=e.slowT>0?e.baseSpd*TRAP_SLOW_MULT:e.baseSpd;
     }
-    const dx=p.x-e.x,dy=p.y-e.y,d=hyp(dx,dy);
+    // Con SIGILO activo los enemigos comunes pierden al héroe y van hacia el último lugar donde lo vieron
+    const inv=p.invisT>0;
+    const tgx=inv?G.invisPos.x:p.x, tgy=inv?G.invisPos.y:p.y;
+    const dx=tgx-e.x,dy=tgy-e.y,d=hyp(dx,dy);
     e.facingLeft = dx<0;
 
     // ── WARLOCK: dispara proyectiles al jugador ───────────────────────────────
     if(e.name==='warlock' && e.shootTimer>=0){
       e.shootTimer-=dt;
-      if(e.shootTimer<=0 && d<420){
+      if(e.shootTimer<=0 && d<420 && !inv){
         e.shootTimer=rf(2.2,4.0);
         const spd=155, nx=dx/d, ny=dy/d;
         [-0.22,0,0.22].forEach(ang=>{
@@ -3003,7 +3098,7 @@ function update(dt){
         if(e.dashT<=0){e.dashing=false; e.dashTimer=rf(3.5,6.0);}
       } else {
         e.dashTimer-=dt;
-        if(e.dashTimer<=0 && d>60){
+        if(e.dashTimer<=0 && d>60 && !inv){
           e.dashing=true; e.dashT=0.26;
           const dspd=500; e.dashVx=dx/d*dspd; e.dashVy=dy/d*dspd; addShake(2);
         }
@@ -3015,7 +3110,7 @@ function update(dt){
 
     updateEnemySpriteAnim(e,dt,d);
 
-    if(d<e.sz+14&&p.invT<=0){const dmgMult=1-Math.min(0.75,p.up.armor||0);p.hp-=e.atk*dt*dmgMult;p.dmgF=.15;p.invT=.28;sndDamage();addShake(4);if(p.hp<=0){endGame();return;}}
+    if(!inv&&d<e.sz+14&&p.invT<=0){const dmgMult=1-Math.min(0.75,p.up.armor||0);p.hp-=e.atk*dt*dmgMult;p.dmgF=.15;p.invT=.28;sndDamage();addShake(4);if(p.hp<=0){endGame();return;}}
 
     // Enemigo ataca al esqueleto más cercano si está en rango (en vez del jugador)
     if(G.skeletons && G.skeletons.length>0){
@@ -3473,8 +3568,10 @@ function draw(){
         ctx.beginPath(); ctx.moveTo(t0.x+cx,t0.y+cy); ctx.lineTo(ax,ay); ctx.stroke(); ctx.globalAlpha=1;
       }
       ctx.translate(ax,ay); ctx.rotate(ang);
-      if(pr.isCrit){ ctx.shadowColor='#ff8800'; ctx.shadowBlur=12; }
-      ctx.strokeStyle='#b8925a'; ctx.lineWidth=2; ctx.lineCap='round';
+      if(pr.charged){ ctx.scale(1.5,1.5); ctx.shadowColor='#ffd34d'; ctx.shadowBlur=16; }
+      else if(pr.ambush){ ctx.scale(1.25,1.25); ctx.shadowColor='#9cff7a'; ctx.shadowBlur=14; }
+      else if(pr.isCrit){ ctx.shadowColor='#ff8800'; ctx.shadowBlur=12; }
+      ctx.strokeStyle=pr.charged?'#ffe08a':'#b8925a'; ctx.lineWidth=2; ctx.lineCap='round';
       ctx.beginPath(); ctx.moveTo(-11,0); ctx.lineTo(6,0); ctx.stroke();                 // astil
       ctx.fillStyle=pr.isCrit?'#ffdd66':'#dfe6ee';
       ctx.beginPath(); ctx.moveTo(11,0); ctx.lineTo(5,-3); ctx.lineTo(5,3); ctx.closePath(); ctx.fill(); // punta
@@ -4533,11 +4630,14 @@ function drawPlayer(W,H,p){
   }
   ctx.restore();
 
+  ctx.save();
+  if(p.invisT>0) ctx.globalAlpha=.3+.1*Math.sin(G.time*14); // SIGILO: el héroe se vuelve translúcido
   if(p.melee)       drawKnight(sx,sy+bob,p);
   else if(p.necro)  drawNecro(sx,sy+bob,p);
   else if(p.yoko)   drawYoko(sx,sy+bob,p);
   else if(p.archer) drawArcher(sx,sy+bob,p);
   else              drawMage(sx,sy+bob,p);
+  ctx.restore();
 
   // HP bar
   // Si el personaje activo usa sprite PNG (más alto que el procedural), la barra sube
@@ -4877,6 +4977,14 @@ function drawEnemy(e,cx,cy,W,H){
 
   ctx.restore();
 
+  if(e.poisonT>0){ // veneno: halo verde en el suelo y burbujas
+    const pk=.5+.5*Math.sin((G.time||0)*8+e.x);
+    ctx.save(); ctx.globalAlpha=.25+.15*pk; ctx.fillStyle='#7bff4a';
+    ctx.beginPath(); ctx.ellipse(sx,sy+s*.6+wy,s*1.1,s*.4,0,0,PI*2); ctx.fill();
+    ctx.globalAlpha=.7; ctx.fillStyle='#b6ff8a';
+    ctx.beginPath(); ctx.arc(sx+Math.sin((G.time||0)*5+e.y)*s*.6,sy-s*.4-((G.time||0)*14%12)+wy,1.6,0,PI*2); ctx.fill();
+    ctx.restore();
+  }
   // HP bar — se coloca justo encima de la cabeza de cada enemigo (los sprites nuevos y el demon/gargoyle
   // son más altos que el valor fijo anterior de 2.8·s y la barra les tapaba la cabeza)
   const hr=Math.max(0,Math.min(1,e.hp/e.mhp));
@@ -5217,6 +5325,9 @@ function updateUpgradesPanel(){
   if((up.shurikenLevel||0)>0) add('✴','SHURIKEN','Nv.'+up.shurikenLevel,'epic');
   if((up.rainLevel||0)>0) add('🌧','LLUVIA','Nv.'+up.rainLevel,'epic');
   if((up.trapLevel||0)>0) add('🪤','TRAMPAS','Nv.'+up.trapLevel,'common');
+  if((up.stealthLevel||0)>0) add('👁','SIGILO','Nv.'+up.stealthLevel+(p.invisT>0?' · '+p.invisT.toFixed(1)+'s':''),'epic');
+  if((up.preciseLevel||0)>0) add('🎯','CERTERO','Nv.'+up.preciseLevel+' · '+(p.shotCount||0)+'/'+(PRECISE_BASE_SHOTS-up.preciseLevel),'epic');
+  if((up.poisonLevel||0)>0) add('☠','VENENO','Nv.'+up.poisonLevel,'common');
   // Necro
   if(p.necro){
     if(up.maxSkeletons>2) add('💀','MUERTOS',up.maxSkeletons,'rare');
