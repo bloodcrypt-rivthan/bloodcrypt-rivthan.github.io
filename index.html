@@ -2967,6 +2967,27 @@ const SPRITE_CFG = {
 const KNIGHT_ANIMS = SPRITE_CFG.knight.anims;
 
 // Helper: dibuja un frame de sprite genérico centrado con pies en (sx,sy)
+// Destello de golpe: antes cada sprite en flash se dibujaba con ctx.filter (4 filtros CSS encadenados) EN CADA FRAME.
+// Con la onda circular de MANO nv.5 (todos los enemigos reciben el flash a la vez) eso eran decenas de pasadas de filtro
+// por frame y el juego se trababa. Ahora el sheet con el filtro aplicado se genera UNA vez (mismo aspecto) y se reutiliza.
+const FLASH_FILTER='brightness(2) saturate(0) sepia(1) hue-rotate(-30deg)';
+const _flashSheets=new WeakMap();
+function getFlashSheet(sheet){
+  let fsh=_flashSheets.get(sheet);
+  if(fsh) return fsh;
+  const w=sheet.naturalWidth||sheet.width, h=sheet.naturalHeight||sheet.height;
+  if(!w||!h) return null; // el sheet aún no cargó: se reintenta en el siguiente frame
+  try{
+    const c=document.createElement('canvas'); c.width=w; c.height=h;
+    const cx2=c.getContext('2d');
+    cx2.filter=FLASH_FILTER;
+    cx2.drawImage(sheet,0,0);
+    cx2.filter='none';
+    fsh=c;
+  }catch(err){ fsh=sheet; } // si falla, se dibuja sin flash en vez de romper el render
+  _flashSheets.set(sheet,fsh);
+  return fsh;
+}
 function drawSpriteFrame(sheet, cfg, animName, frame, sx, sy, facingLeft, dmgFlash){
   if(!sheet) return false;
   const [start, count, fps] = cfg.anims[animName] || cfg.anims.idle;
@@ -2977,8 +2998,8 @@ function drawSpriteFrame(sheet, cfg, animName, frame, sx, sy, facingLeft, dmgFla
   ctx.save();
   ctx.translate(sx, sy);
   if(facingLeft) ctx.scale(-1,1);
-  if(dmgFlash) ctx.filter='brightness(2) saturate(0) sepia(1) hue-rotate(-30deg)';
-  ctx.drawImage(sheet, f*stride+srcX, srcY, srcW, srcH, -drawW/2, -drawH, drawW, drawH);
+  const srcImg=dmgFlash?(getFlashSheet(sheet)||sheet):sheet;
+  ctx.drawImage(srcImg, f*stride+srcX, srcY, srcW, srcH, -drawW/2, -drawH, drawW, drawH);
   ctx.restore();
   return true;
 }
@@ -3434,11 +3455,14 @@ function draw(){
         // Onda circular — nivel 5
         ctx.globalAlpha=t*.4;
         ctx.strokeStyle='#44ffaa'; ctx.lineWidth=4*t+1;
-        ctx.shadowColor='#44ffaa'; ctx.shadowBlur=12;
+        // sin shadowBlur (círculo enorme): brillo falso con un trazo ancho y tenue debajo del anillo
+        ctx.save(); ctx.globalAlpha=t*.16; ctx.lineWidth=10*t+4;
+        ctx.beginPath(); ctx.arc(sx,sy,fx.range*(1-t*.1),0,PI*2); ctx.stroke();
+        ctx.restore();
         ctx.beginPath();
         ctx.arc(sx,sy,fx.range*(1-t*.1),0,PI*2);
         ctx.stroke();
-        ctx.shadowBlur=0; // el relleno del círculo completo no lleva blur (área enorme)
+        ctx.shadowBlur=0;
         ctx.globalAlpha=t*.15;
         ctx.fillStyle='#44ffaa';
         ctx.beginPath(); ctx.arc(sx,sy,fx.range*(1-t*.1),0,PI*2); ctx.fill();
@@ -3497,9 +3521,13 @@ function draw(){
     ctx.fillStyle=ef.col;
     ctx.beginPath();ctx.arc(sx,sy,r,0,PI*2);ctx.fill();
     // Anillo principal con glow
-    ctx.globalAlpha=t*.8;
-    ctx.shadowColor=ef.col; ctx.shadowBlur=10+t*8;
     ctx.strokeStyle=ef.col;
+    if(ef.range>220){
+      // anillo grande: el shadowBlur sobre un círculo así de grande es carísimo; brillo falso con un trazo ancho y tenue
+      ctx.globalAlpha=t*.18; ctx.lineWidth=9+t*6;
+      ctx.beginPath();ctx.arc(sx,sy,r,0,PI*2);ctx.stroke();
+    } else { ctx.shadowColor=ef.col; ctx.shadowBlur=10+t*8; }
+    ctx.globalAlpha=t*.8;
     ctx.lineWidth=2+t*2.5;
     ctx.beginPath();ctx.arc(sx,sy,r,0,PI*2);ctx.stroke();
     // Anillo exterior más tenue
