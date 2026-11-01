@@ -1238,13 +1238,22 @@ function enslaveBoss(boss){
     projTimer:0, life:60, alive:true, targetId:null
   });
 }
+// Topes de partículas: con hordas grandes un solo ataque en área generaba cientos de partículas
+// (cada una dibujada con shadowBlur) y el juego se trababa mientras duraban. Al acercarse al tope se reduce la cantidad.
+const PARTS_MAX=450, BLOOD_MAX=600;
 function spParts(x,y,col,n){
+  const room=PARTS_MAX-G.parts.length; if(room<=0) return;
+  if(G.parts.length>PARTS_MAX*.4) n=Math.ceil(n*.5);
+  n=Math.min(n,room);
   for(let i=0;i<n;i++){
     const a=rf(0,PI*2),sp=rf(50,180),l=rf(.3,.8);
     G.parts.push({x,y,vx:Math.cos(a)*sp,vy:Math.sin(a)*sp-rf(20,60),col,life:l,ml:l,sz:rf(2,5),rot:rf(0,PI*2),rotV:rf(-4,4)});
   }
 }
 function spawnBlood(x,y,n,col){
+  const room=BLOOD_MAX-G.bloodSplats.length; if(room<=0) return;
+  if(G.bloodSplats.length>BLOOD_MAX*.4) n=Math.ceil(n*.5);
+  n=Math.min(n,room);
   for(let i=0;i<n;i++){
     const a=rf(0,PI*2),sp=rf(30,120);
     G.bloodSplats.push({x,y,vx:Math.cos(a)*sp,vy:Math.sin(a)*sp,col,life:rf(.4,.9),ml:1,sz:rf(2,5)});
@@ -1575,7 +1584,7 @@ function doNecroAttack(){
     const anyInRange=alive.some(t=>hyp(t.x-p.x,t.y-p.y)<range+t.sz);
     if(!anyInRange) return;
     triggerSprAttack(p);
-    let hit=false;
+    let hit=false, hitSnd=false, hitBossSnd=false; // el sonido de impacto suena una sola vez por onda, no una por enemigo
     const allTargets=[...alive];
     allTargets.forEach(target=>{
       const d=hyp(target.x-p.x,target.y-p.y);
@@ -1583,13 +1592,14 @@ function doNecroAttack(){
         const{dmg,isCrit}=calcDmg(p.atk+p.up.atk);
         target.hp-=dmg; target.fl=.15;
         if(isCrit){G.totalCrits++;spawnDmgNum(target.x,target.y-target.sz*2,dmg,true);sndCrit();}
-        else if(target===G.boss){sndBossHit();} else{sndHit();}
+        else if(target===G.boss){hitBossSnd=true;} else{hitSnd=true;}
         spParts(target.x,target.y,isCrit?'#aaffcc':'#44ffaa',isCrit?12:7);
         spawnBlood(target.x,target.y,isCrit?12:7,'#225533');
         hit=true;
         if(target.hp<=0){ if(target===G.boss) killBoss(); else killE(target); }
       }
     });
+    if(hitBossSnd) sndBossHit(); else if(hitSnd) sndHit();
     if(hit){ sndSummon(); G.meleeEff.push({x:p.x,y:p.y,life:.3,range,col:'#44ffaa'}); }
     G.spectralFX=G.spectralFX||[];
     G.spectralFX.push({type:'circle',x:p.x,y:p.y,life:.35,ml:.35,range});
@@ -2411,7 +2421,10 @@ function playNoise(opts){
   }catch(e){}
 }
 
+let lastHitSndT=0;
 function sndHit(){
+  const now=performance.now(); if(now-lastHitSndT<35) return; // varios golpes en el mismo instante: un solo sonido
+  lastHitSndT=now;
   playNoise({filterFreq:1200,filterType:'bandpass',Q:0.8,vol:0.55,dur:0.08,decay:0.07});
   playTone({type:'square',freq:180,freq2:80,dur:0.07,vol:0.3,filterFreq:600});
 }
@@ -2443,7 +2456,10 @@ function sndLightning(isCrit){
   playTone({type:'sawtooth',freq:900,freq2:60,dur:0.22,vol:0.22,attack:0.002,filterFreq:1800});
   if(isCrit) sndCrit();
 }
+let lastKillSndT=0;
 function sndKill(){
+  const now=performance.now(); if(now-lastKillSndT<45) return; // muertes simultáneas: un solo sonido (cada uno crea varios nodos de audio)
+  lastKillSndT=now;
   playTone({type:'sine',freq:120,freq2:55,dur:0.18,vol:0.45,attack:0.004,decay:0.18});
   playNoise({filterFreq:400,filterType:'lowpass',Q:0.5,vol:0.3,dur:0.07,decay:0.06});
 }
@@ -3383,7 +3399,8 @@ function draw(){
         // Cono de daño — relleno translúcido + borde
         ctx.globalAlpha=t*.35;
         ctx.fillStyle='#44ffaa';
-        ctx.shadowColor='#44ffaa'; ctx.shadowBlur=14;
+        // el blur sobre un sector tan grande es muy caro (y con 4-8 conos a la vez, peor): solo con pocos conos activos
+        if(G.spectralFX.length<=2){ ctx.shadowColor='#44ffaa'; ctx.shadowBlur=14; }
         ctx.beginPath();
         ctx.moveTo(sx,sy);
         ctx.arc(sx,sy,fx.range*(0.9+(1-t)*.25),fx.ang-fx.half,fx.ang+fx.half);
@@ -3417,10 +3434,11 @@ function draw(){
         // Onda circular — nivel 5
         ctx.globalAlpha=t*.4;
         ctx.strokeStyle='#44ffaa'; ctx.lineWidth=4*t+1;
-        ctx.shadowColor='#44ffaa'; ctx.shadowBlur=20;
+        ctx.shadowColor='#44ffaa'; ctx.shadowBlur=12;
         ctx.beginPath();
         ctx.arc(sx,sy,fx.range*(1-t*.1),0,PI*2);
         ctx.stroke();
+        ctx.shadowBlur=0; // el relleno del círculo completo no lleva blur (área enorme)
         ctx.globalAlpha=t*.15;
         ctx.fillStyle='#44ffaa';
         ctx.beginPath(); ctx.arc(sx,sy,fx.range*(1-t*.1),0,PI*2); ctx.fill();
@@ -3431,7 +3449,7 @@ function draw(){
           ctx.save();
           ctx.globalAlpha=t*.7;
           ctx.translate(hx,hy); ctx.rotate(ang);
-          ctx.shadowBlur=8;
+          ctx.shadowBlur=0;
           ctx.fillStyle='rgba(150,255,200,.6)';
           ctx.beginPath(); ctx.ellipse(0,0,7,9,0,0,PI*2); ctx.fill();
           ctx.restore();
@@ -3688,19 +3706,23 @@ function draw(){
   }
 
   // Particles — círculos con glow
+  // shadowBlur es lo más caro del canvas: el glow solo se dibuja mientras hay pocas partículas
+  const partGlow=G.parts.length<140;
+  ctx.save();
   for(const pt of G.parts){
     const sx=pt.x+cx,sy=pt.y+cy;
     const a=clamp(pt.life/pt.ml,0,1);
-    ctx.save();
     ctx.globalAlpha=a;
-    ctx.shadowColor=pt.col; ctx.shadowBlur=pt.sz*2;
     ctx.fillStyle=pt.col;
+    if(partGlow){ ctx.shadowColor=pt.col; ctx.shadowBlur=pt.sz*2; }
     ctx.beginPath(); ctx.arc(sx,sy,pt.sz*.6,0,PI*2); ctx.fill();
-    ctx.fillStyle='rgba(255,255,255,.7)';
-    ctx.shadowBlur=0;
-    ctx.beginPath(); ctx.arc(sx-pt.sz*.15,sy-pt.sz*.15,pt.sz*.18,0,PI*2); ctx.fill();
-    ctx.restore();
+    if(partGlow){
+      ctx.fillStyle='rgba(255,255,255,.7)';
+      ctx.shadowBlur=0;
+      ctx.beginPath(); ctx.arc(sx-pt.sz*.15,sy-pt.sz*.15,pt.sz*.18,0,PI*2); ctx.fill();
+    }
   }
+  ctx.restore();
 
   // Skeletons
   if(G.skeletons) drawSkeletons(cx,cy);
