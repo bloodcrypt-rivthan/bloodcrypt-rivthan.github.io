@@ -28,6 +28,15 @@ canvas{display:block}
 .stat-upg-row.stat-rare{color:#88aaff}
 .stat-upg-row.stat-epic{color:#cc88ff}
 .stat-upg-row.stat-gold{color:#ffcc44}
+/* Mejora al nivel máximo: las letras pulsan entre su color y dorado */
+.stat-upg-row.stat-common{--tc:#888}
+.stat-upg-row.stat-rare{--tc:#88aaff}
+.stat-upg-row.stat-epic{--tc:#cc88ff}
+.stat-upg-row.stat-gold{--tc:#ffcc44}
+@keyframes upgMaxGlow{0%,100%{color:var(--tc);text-shadow:0 0 6px rgba(0,0,0,.8)}50%{color:#ffd700;text-shadow:0 0 8px rgba(255,200,40,.85),0 0 2px rgba(0,0,0,.8)}}
+@keyframes upgMaxGlowVal{0%,100%{color:#e8d5a3;text-shadow:0 0 6px rgba(0,0,0,.8)}50%{color:#ffd700;text-shadow:0 0 8px rgba(255,200,40,.85),0 0 2px rgba(0,0,0,.8)}}
+.stat-upg-row.maxed{animation:upgMaxGlow 1.6s ease-in-out infinite}
+.stat-upg-row.maxed .stat-upg-val{animation:upgMaxGlowVal 1.6s ease-in-out infinite;animation-delay:inherit}
 #char-name{color:#e8d5a3;font-size:13px;letter-spacing:2px;text-shadow:0 0 8px #c0392b88;margin-bottom:6px}
 .hbar-wrap{position:relative;width:180px;height:14px;background:#0e0000;border:1px solid #c0392b44;margin-bottom:4px}
 .hbar-fill{height:100%;transition:width .12s;position:relative}
@@ -304,7 +313,7 @@ function toggleFS(){
 document.addEventListener('keydown',e=>{if(e.key==='F11'){e.preventDefault();toggleFS();}});
 
 // ─── CONSTANTS ────────────────────────────────────────────────────────────────
-const PI=Math.PI, TILE=32, RW=100, RH=20;
+const PI=Math.PI, TILE=32, RW=100, RH=30;
 const HERO_Y_LIMIT=RH*TILE*.38;   // |y| máximo al que puede llegar el héroe (mismo límite que el clamp de movimiento)
 const ORB_SLIDE_SPEED=170;        // px/s a la que un orbe fuera de alcance se desliza hacia el borde más cercano
 const ORB_PICKUP_R=16, BONE_PICKUP_R=24;  // radio base de recogida de orbes de XP y de huesos (Yoko)
@@ -2929,7 +2938,7 @@ const SPRITE_CFG = {
   },
   archer: {
     // Sheet de 12 frames (392x408, ojos como ancla horizontal y pies en la misma línea):
-    //   0-1 idle (poses de reposo del disparo), 2-5 ataque (alcanzar flecha, tensar, tensar a fondo, SOLTAR), 6-11 caminata.
+    //   0-1 idle (poses de reposo del disparo), 2-5 ataque (alcanzar flecha, tensar, tensar a fondo, SOLTAR), 6-11 caminata (original, 6 frames).
     // La flecha NO está dibujada saliendo: el proyectil lo genera doArcherShoot() justo en el último frame (soltar).
     // death: sin animación propia todavía (usa la pose de reposo).
     anims: { idle:[0,2,2.5], attack:[2,4,26], walk:[6,6,10], death:[0,1,4] },
@@ -5294,7 +5303,7 @@ function updateUpgradesPanel(){
 
   // Helpers
   const pct=v=>Math.round(v*100)+'%';
-  const add=(icon,label,val,tier)=>rows.push({icon,label,val,tier:tier||'common'});
+  const add=(icon,label,val,tier,maxed)=>rows.push({icon,label,val,tier:tier||'common',maxed:!!maxed});
 
   // ATK
   if(up.atk>0) add('⚔','ATQ','+'+up.atk,'rare');
@@ -5319,36 +5328,39 @@ function updateUpgradesPanel(){
   // Multishot (Mage)
   if(up.multishot>1) add('➳','MULTI','x'+(up.multishot),'epic');
   // Proj speed
-  if((up.lightningLevel||0)>0) add('⚡','RAYO','Nv.'+up.lightningLevel,'epic');
-  if((up.pickupLevel||0)>0) add('🧲','RECOLEC.','Nv.'+up.pickupLevel,'common');
-  if((up.pierceLevel||0)>0) add('➳','PENETR.','Nv.'+up.pierceLevel,'common');
-  if((up.shurikenLevel||0)>0) add('✴','SHURIKEN','Nv.'+up.shurikenLevel,'epic');
-  if((up.rainLevel||0)>0) add('🌧','LLUVIA','Nv.'+up.rainLevel,'epic');
-  if((up.trapLevel||0)>0) add('🪤','TRAMPAS','Nv.'+up.trapLevel,'common');
-  if((up.stealthLevel||0)>0) add('👁','SIGILO','Nv.'+up.stealthLevel+(p.invisT>0?' · '+p.invisT.toFixed(1)+'s':''),'epic');
-  if((up.preciseLevel||0)>0) add('🎯','CERTERO','Nv.'+up.preciseLevel+' · '+(p.shotCount||0)+'/'+(PRECISE_BASE_SHOTS-up.preciseLevel),'epic');
-  if((up.poisonLevel||0)>0) add('☠','VENENO','Nv.'+up.poisonLevel,'common');
+  if((up.lightningLevel||0)>0) add('⚡','RAYO','Nv.'+up.lightningLevel,'epic',up.lightningLevel>=LIGHTNING_MAX);
+  if((up.pickupLevel||0)>0) add('🧲','RECOLEC.','Nv.'+up.pickupLevel,'common',up.pickupLevel>=PICKUP_MAX);
+  if((up.pierceLevel||0)>0) add('➳','PENETR.','Nv.'+up.pierceLevel,'common',up.pierceLevel>=PIERCE_MAX);
+  if((up.shurikenLevel||0)>0) add('✴','SHURIKEN','Nv.'+up.shurikenLevel,'epic',up.shurikenLevel>=SHURIKEN_MAX);
+  if((up.rainLevel||0)>0) add('🌧','LLUVIA','Nv.'+up.rainLevel,'epic',up.rainLevel>=RAIN_MAX);
+  if((up.trapLevel||0)>0) add('🪤','TRAMPAS','Nv.'+up.trapLevel,'common',up.trapLevel>=TRAP_MAX);
+  if((up.stealthLevel||0)>0) add('👁','SIGILO','Nv.'+up.stealthLevel+(p.invisT>0?' · '+p.invisT.toFixed(1)+'s':''),'epic',up.stealthLevel>=STEALTH_MAX);
+  if((up.preciseLevel||0)>0) add('🎯','CERTERO','Nv.'+up.preciseLevel+' · '+(p.shotCount||0)+'/'+(PRECISE_BASE_SHOTS-up.preciseLevel),'epic',up.preciseLevel>=PRECISE_MAX);
+  if((up.poisonLevel||0)>0) add('☠','VENENO','Nv.'+up.poisonLevel,'common',up.poisonLevel>=POISON_MAX);
   // Necro
   if(p.necro){
     if(up.maxSkeletons>2) add('💀','MUERTOS',up.maxSkeletons,'rare');
     if(up.skelDmgMult>1) add('💀','ESQ+',pct(up.skelDmgMult-1),'rare');
     if(up.skelSpdMult>1) add('💀','ESQ⚡',pct(up.skelSpdMult-1),'common');
     if(up.skelAtkSpdMult>1) add('💀','ESQ🗡',pct(up.skelAtkSpdMult-1),'common');
-    if(up.summonRate<1) add('⏱','RITUAL',pct(1-up.summonRate)+' más rápido','common');
-    if(up.resurrectChance>0) add('✝','RESUC',pct(up.resurrectChance),'epic');
-    if((up.spectralLevel||1)>1) add('👻','MANO','Nv.'+(up.spectralLevel||1),'epic');
+    if(up.summonRate<1) add('⏱','RITUAL',pct(1-up.summonRate)+' más rápido','common',Math.round((1-up.summonRate)*100)>=100);
+    if(up.resurrectChance>0) add('✝','RESUC',pct(up.resurrectChance),'epic',up.resurrectChance>=1);
+    if((up.spectralLevel||1)>1) add('👻','MANO','Nv.'+(up.spectralLevel||1),'epic',(up.spectralLevel||1)>=5);
   }
   // Yoko
   if(p.yoko){
     if(up.chargeDmgMult>1) add('🐾','EMBESTIDA','x'+up.chargeDmgMult.toFixed(2),'rare');
-    if(up.boneChance>0.05) add('🦴','HUESO',pct(up.boneChance),'rare');
+    if(up.boneChance>0.05) add('🦴','HUESO',pct(up.boneChance),'rare',up.boneChance>=1);
     if(up.boneDuration>1) add('🦴','HUESO×',up.boneDuration.toFixed(0)+'x dur.','common');
     if(up.chargeLifesteal>0) add('🩸','VAMPIRO+','+'+up.chargeLifesteal,'rare');
   }
 
-  panel.innerHTML=rows.map(r=>
-    `<div class="stat-upg-row stat-${r.tier}"><span class="stat-upg-icon">${r.icon}</span><span>${r.label}</span><span class="stat-upg-val">${r.val}</span></div>`
+  // El panel se reescribe con innerHTML: el delay negativo ligado al reloj mantiene continua la fase del brillo
+  const glowDelay='-'+(((performance.now()/1000)%1.6).toFixed(3))+'s';
+  const html=rows.map(r=>
+    `<div class="stat-upg-row stat-${r.tier}${r.maxed?' maxed':''}"${r.maxed?` style="animation-delay:${glowDelay}"`:''}><span class="stat-upg-icon">${r.icon}</span><span>${r.label}</span><span class="stat-upg-val">${r.val}</span></div>`
   ).join('');
+  if(html!==panel._lastHtml){ panel.innerHTML=html; panel._lastHtml=html; }
 }
 function endGame(){
   sndDeath(); stopMusic(2.0);
