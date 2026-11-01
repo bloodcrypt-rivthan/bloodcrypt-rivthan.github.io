@@ -335,6 +335,14 @@ const ri=(lo,hi)=>lo+Math.floor(Math.random()*(hi-lo+1));
 // Velocidad de movimiento actual del héroe (base + mejoras + bonus de FURIA/VELOZ). La usa Lilith para no dejarse escapar.
 const FURY_SPEED_BOOST=60;
 const LILITH_SPEED_FACTOR=1.08; // Lilith se mueve un 8% más rápido que el héroe
+// Daño por contacto. ANTES: ATK×dt (≈ATK/60: casi nulo, dependiente de los FPS) y una sola vez por ventana de invulnerabilidad,
+// sin importar cuántos enemigos tocaran al héroe. AHORA: golpe fijo por contacto, independiente de los FPS, y la multitud suma.
+const CONTACT_HIT_MULT=0.25;      // golpe de contacto de un enemigo = ATK × 0.25 (Demonio 7, Gárgola 5.5, Zombi 3.5…)
+const BOSS_CONTACT_HIT_MULT=0.5;  // golpe de contacto del Liche Rey = ATK × mult. de fase × 0.5
+const CONTACT_CROWD_MULT=0.10;    // cada enemigo EXTRA que toca al héroe suma el 10% de su golpe…
+const CONTACT_CROWD_CAP=2;        // …hasta un máximo de +200% del golpe base (3× en total). Pon CONTACT_CROWD_MULT=0 para desactivarlo
+const ARMOR_MAX=0.75;             // tope de reducción de daño por ARMADURA (4 picks de 20%: el 4.º llega justo al tope)
+const ATK_SPEED_PER_PICK=0.2;     // VEL. ATAQUE: +20% de ataques por segundo por mejora (aditivo)
 function heroMoveSpeed(p){ return p.spd+p.up.spd+(G.furyTimer>0?FURY_SPEED_BOOST:0); }
 const hyp=(dx,dy)=>Math.sqrt(dx*dx+dy*dy);
 const clamp=(v,lo,hi)=>Math.max(lo,Math.min(hi,v));
@@ -2134,10 +2142,10 @@ function buildPool(){
     {title:'VIDA+',        desc:'+40 HP máx + curación',      t:'',      apply(){p.mhp+=40;p.hp=Math.min(p.mhp,p.hp+40)}},
     {title:'VEL. MOVIMIENTO',desc:'+25 vel. de movimiento',     t:'',      apply(){p.up.spd+=25}},
     {title:'ALCANCE+',       desc:'+25% alcance/radio ataque',  t:'',      apply(){p.up.rng*=1.25}},
-    {title:'VEL. ATAQUE',    desc:'20% velocidad de ataque',    t:'',      apply(){p.up.rate+=p.rate*.1}},
+    {title:'VEL. ATAQUE',    desc:'+20% velocidad de ataque',   t:'',      apply(){p.up.rate+=ATK_SPEED_PER_PICK}},
     {title:'REGEN',          desc:'+2 HP/seg regeneración',     t:'',      apply(){p.up.regen+=2}},
     {title:'VAMPIRO',        desc:'+1.5 HP por enemigo',        t:'',      apply(){p.up.lifesteal=(p.up.lifesteal||0)+1.5}},
-    {title:'ARMADURA',       desc:'-20% daño recibido',         t:'',      apply(){p.up.armor=(p.up.armor||0)+.2}},
+    {title:'ARMADURA',       desc:'-20% daño recibido (máx. 75%)', t:'',    apply(){p.up.armor=Math.min(ARMOR_MAX,(p.up.armor||0)+.2)}, hide(){return (p.up.armor||0)>=ARMOR_MAX}},
     {title:'GANANCIA XP',        desc:'+50% XP de enemigos',        t:'xp-t',  apply(){p.up.xpm*=1.5}},
     (()=>{
       const cur=p.up.pickupLevel||0;
@@ -3106,7 +3114,7 @@ function update(dt){
 
   // Attack
   p.atkt-=dt;
-  if(p.atkt<=0){p.atkt=Math.max(.1,p.rate-p.up.rate); p.melee?doMelee():(p.necro?doNecroAttack():(p.yoko?doYokoCharge():(p.archer?doArcherShoot():doShoot())));}
+  if(p.atkt<=0){p.atkt=Math.max(.1,p.rate/(1+p.up.rate)); p.melee?doMelee():(p.necro?doNecroAttack():(p.yoko?doYokoCharge():(p.archer?doArcherShoot():doShoot())));}
   if(p.necro) updateSkeletons(dt);
   updateArrowQueue(dt);
   updateShurikens(dt);
@@ -3215,7 +3223,14 @@ function update(dt){
 
     updateEnemySpriteAnim(e,dt,d);
 
-    if(!inv&&d<e.sz+14&&p.invT<=0){const dmgMult=1-Math.min(0.75,p.up.armor||0);p.hp-=e.atk*dt*dmgMult;p.dmgF=.15;p.invT=.28;sndDamage();addShake(4);if(p.hp<=0){endGame();return;}}
+    if(!inv&&d<e.sz+14&&p.invT<=0){
+      const dmgMult=1-Math.min(ARMOR_MAX,p.up.armor||0);
+      let hit=e.atk*CONTACT_HIT_MULT, extra=0;
+      // multitud: los demás enemigos que también tocan al héroe suman una fracción de su golpe (con tope)
+      for(const o of G.enemies){ if(o===e||!o.alive) continue; if(hyp(o.x-p.x,o.y-p.y)<o.sz+14) extra+=o.atk*CONTACT_HIT_MULT*CONTACT_CROWD_MULT; }
+      hit+=Math.min(extra,hit*CONTACT_CROWD_CAP);
+      p.hp-=hit*dmgMult;p.dmgF=.15;p.invT=.28;sndDamage();addShake(4);if(p.hp<=0){endGame();return;}
+    }
 
     // Enemigo ataca al esqueleto más cercano si está en rango (en vez del jugador)
     if(G.skeletons && G.skeletons.length>0){
@@ -3249,7 +3264,7 @@ function update(dt){
     if(pr.life<=0){G.eProjs.splice(i,1);continue;}
     const ddx=pr.x-p.x,ddy=pr.y-p.y;
     if(Math.sqrt(ddx*ddx+ddy*ddy)<14&&p.invT<=0){
-      const dmgMult=1-Math.min(0.75,p.up.armor||0);
+      const dmgMult=1-Math.min(ARMOR_MAX,p.up.armor||0);
       p.hp-=pr.dmg*dmgMult; p.dmgF=.15; p.invT=.35; sndDamage(); addShake(3);
       G.eProjs.splice(i,1);
       if(p.hp<=0){endGame();return;}
@@ -3340,9 +3355,9 @@ function update(dt){
     // Boss melee damage to player
     boss.inMelee = dist<boss.sz+14;
     if(boss.inMelee && p.invT<=0){
-      const dmgMult=1-Math.min(0.75,p.up.armor||0);
+      const dmgMult=1-Math.min(ARMOR_MAX,p.up.armor||0);
       const phaseDmg=boss.phase===3?boss.atk*2.2:boss.phase===2?boss.atk*1.5:boss.atk;
-      p.hp-=phaseDmg*dt*dmgMult; p.dmgF=.15; p.invT=.32; sndDamage(); addShake(7);
+      p.hp-=phaseDmg*BOSS_CONTACT_HIT_MULT*dmgMult; p.dmgF=.15; p.invT=.32; sndDamage(); addShake(7);
     }
 
     // Boss ranged attack — lanza proyectiles en todas direcciones en fase 2+
@@ -3433,7 +3448,7 @@ function update(dt){
       if(pr.trail.length>8) pr.trail.shift();
       const dx=pr.x-p.x, dy=pr.y-p.y;
       if(Math.sqrt(dx*dx+dy*dy)<16 && p.invT<=0){
-        const dmgMult=1-Math.min(0.75,p.up.armor||0);
+        const dmgMult=1-Math.min(ARMOR_MAX,p.up.armor||0);
         p.hp-=18*dmgMult; p.dmgF=.15; p.invT=.38; sndDamage(); addShake(5);
         G.bossProjs.splice(i,1);
       }
@@ -5419,7 +5434,7 @@ function updateUpgradesPanel(){
   // Velocidad movimiento
   if(up.spd>0) add('💨','VEL','+'+up.spd,'common');
   // Rate de ataque
-  if(up.rate>0) add('⚡','ATQ/S',pct(up.rate/1.4),'common');
+  if(up.rate>0) add('⚡','ATQ/S','+'+pct(up.rate),'common');
   // Alcance
   if(up.rng>1) add('🎯','ALC','x'+up.rng.toFixed(1),'common');
   // Regen
