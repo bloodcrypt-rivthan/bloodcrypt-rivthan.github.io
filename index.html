@@ -63,9 +63,17 @@ canvas{display:block}
 #debug-panel button:disabled{opacity:.35;cursor:not-allowed}
 /* ============ FIN DEBUG PANEL ============ */
 #pausebtn:hover{border-color:#c0392b;color:#fff}
-#mutebtn{position:absolute;top:12px;right:48px;background:rgba(10,0,0,.8);border:1px solid #444;color:#aaa;font-size:15px;width:30px;height:30px;cursor:pointer;pointer-events:all;display:none;line-height:30px;text-align:center;transition:all .2s}
-#mutebtn:hover{border-color:#c0392b;color:#fff}
-#mutebtn.muted{color:#555;border-color:#333}
+#volbtn{position:absolute;top:12px;right:48px;background:rgba(10,0,0,.8);border:1px solid #444;color:#aaa;font-size:15px;width:30px;height:30px;cursor:pointer;pointer-events:all;display:none;line-height:30px;text-align:center;transition:all .2s}
+#volbtn:hover,#volbtn.open{border-color:#c0392b;color:#fff}
+#volbtn.zero{color:#555;border-color:#333}
+/* Control de volumen general */
+#volpop{position:absolute;top:12px;right:84px;height:30px;padding:0 10px;display:none;align-items:center;gap:8px;background:rgba(10,0,0,.88);border:1px solid #444;pointer-events:all;z-index:5}
+.vol-slider{-webkit-appearance:none;appearance:none;width:110px;height:4px;background:#3a2a2a;outline:none;cursor:pointer;border-radius:2px;margin:0}
+.vol-slider::-webkit-slider-thumb{-webkit-appearance:none;appearance:none;width:13px;height:13px;background:#e8d5a3;border:1px solid #000;border-radius:50%;cursor:pointer}
+.vol-slider::-moz-range-thumb{width:11px;height:11px;background:#e8d5a3;border:1px solid #000;border-radius:50%;cursor:pointer}
+.vol-pct{color:#e8d5a3;font-size:11px;min-width:36px;text-align:right;letter-spacing:1px}
+.pvol{display:flex;align-items:center;gap:10px;color:#888;font-size:11px;letter-spacing:2px;margin-top:6px}
+.pvol .vol-slider{width:150px}
 
 /* Fullscreen btn */
 #fs-btn{position:absolute;bottom:12px;right:12px;background:rgba(0,0,0,.6);border:1px solid #333;color:#666;font-family:'Courier New',monospace;font-size:11px;padding:5px 10px;cursor:pointer;pointer-events:all;transition:all .2s;letter-spacing:1px}
@@ -209,7 +217,8 @@ canvas{display:block}
     <div id="lilith-dmg">Próximo golpe: <span id="lilith-dmg-val">0</span></div>
   </div>
   <div id="bone-panel"></div>
-  <button id="mutebtn" onclick="toggleMute()" title="Silenciar/Activar sonido">🔊</button>
+  <button id="volbtn" onclick="toggleVolPop(event)" title="Volumen">🔊</button>
+  <div id="volpop"><input type="range" class="vol-slider" min="0" max="100" step="1" value="80" aria-label="Volumen general"><span class="vol-pct">80%</span></div>
   <button id="pausebtn" onclick="togglePause()">⏸</button>
 </div>
 
@@ -277,6 +286,7 @@ canvas{display:block}
     <button class="start-btn" onclick="togglePause()">▶  CONTINUAR</button>
     <button class="sec-btn" onclick="goMenu()">↩  MENÚ PRINCIPAL</button>
     <button id="joystick-toggle" onclick="toggleJoystick()">🕹 JOYSTICK: DESACTIVADO</button>
+    <div class="pvol"><span>🔊 VOLUMEN</span><input type="range" class="vol-slider" min="0" max="100" step="1" value="80" aria-label="Volumen general"><span class="vol-pct">80%</span></div>
   </div>
 </div>
 
@@ -656,7 +666,7 @@ function goMenu(){
   updateCharCard(); startPreview();
   document.getElementById('hud').style.display='none';
   document.getElementById('pausebtn').style.display='none';
-  document.getElementById('mutebtn').style.display='none';
+  showVolBtn(false);
 }
 function startGame(){
   ['menu','gover'].forEach(id=>document.getElementById(id).style.display='none');
@@ -664,7 +674,7 @@ function startGame(){
   document.getElementById('hud').style.display='block';
   document.getElementById('pausebtn').style.display='block';
   document.getElementById('pausebtn').textContent='⏸';
-  document.getElementById('mutebtn').style.display='block';
+  showVolBtn(true);
   startMusic('dungeon');
   document.getElementById('xp-mult').style.display='none';
   document.getElementById('crit-row').style.display='none';
@@ -2352,15 +2362,64 @@ function getACtx(){
   if(!_actx) _actx = new (window.AudioContext||window.webkitAudioContext)();
   return _actx;
 }
-let _muted = false;
 const BASE_VOL = 0.28;
-const MASTER_VOL_FN = () => _muted ? 0 : BASE_VOL;
 
-function toggleMute(){
-  _muted = !_muted;
-  const btn = document.getElementById('mutebtn');
-  if(btn){ btn.textContent = _muted ? '🔇' : '🔊'; btn.classList.toggle('muted', _muted); }
+// ─── VOLUMEN GENERAL (reemplaza al mute) ────────────────────────────────────
+// Un solo control 0–100% para efectos y música. VOL_DEFAULT (80%) equivale al volumen original del juego;
+// de 80% a 100% se puede subir hasta ~1.5x. La curva es cuadrática (más natural al oído que una lineal).
+const VOL_DEFAULT = 80;
+let _volPct = VOL_DEFAULT;
+try{ const sv=localStorage.getItem('bloodcrypt_vol'); if(sv!==null && sv!=='' && !isNaN(+sv)) _volPct=clamp(Math.round(+sv),0,100); }catch(e){}
+let _volGain = Math.pow(_volPct/VOL_DEFAULT, 2);
+const MASTER_VOL_FN = () => BASE_VOL * _volGain;
+const musicTarget = () => MUSIC.musicVol * _volGain;
+
+function volIcon(){ return _volPct===0 ? '🔇' : _volPct<34 ? '🔈' : _volPct<67 ? '🔉' : '🔊'; }
+function syncVolUI(){
+  document.querySelectorAll('.vol-slider').forEach(sl=>{ if(+sl.value!==_volPct) sl.value=_volPct; });
+  document.querySelectorAll('.vol-pct').forEach(el=>{ el.textContent=_volPct+'%'; });
+  const btn=document.getElementById('volbtn');
+  if(btn){ btn.textContent=volIcon(); btn.classList.toggle('zero', _volPct===0); }
 }
+function setVolume(pct){
+  _volPct = clamp(Math.round(pct),0,100);
+  _volGain = Math.pow(_volPct/VOL_DEFAULT, 2);
+  syncVolUI();
+  try{ localStorage.setItem('bloodcrypt_vol', String(_volPct)); }catch(e){}
+  // La música ya sonando se ajusta en vivo (no si está en crossfade o apagándose: esos fades toman el volumen al terminar)
+  if(MUSIC.masterGain && MUSIC.currentTheme && !MUSIC.crossfading && !MUSIC._stopping){
+    const t=getMCtx().currentTime, g=MUSIC.masterGain.gain;
+    g.cancelScheduledValues(t); g.setValueAtTime(g.value,t); g.linearRampToValueAtTime(musicTarget(), t+.05);
+  }
+}
+function toggleVolPop(ev){
+  if(ev) ev.stopPropagation();
+  const pop=document.getElementById('volpop'), btn=document.getElementById('volbtn');
+  const open = pop.style.display!=='flex';
+  pop.style.display = open ? 'flex' : 'none';
+  btn.classList.toggle('open', open);
+}
+function closeVolPop(){
+  const pop=document.getElementById('volpop'), btn=document.getElementById('volbtn');
+  if(pop) pop.style.display='none'; if(btn) btn.classList.remove('open');
+}
+function showVolBtn(on){
+  const btn=document.getElementById('volbtn'); if(btn) btn.style.display=on?'block':'none';
+  if(!on) closeVolPop();
+}
+(function initVolume(){
+  document.querySelectorAll('.vol-slider').forEach(sl=>{
+    sl.addEventListener('input',()=>setVolume(+sl.value));
+    // al soltar: un pequeño sonido para oír el nivel, y se quita el foco para que WASD/flechas no muevan el slider
+    sl.addEventListener('change',()=>{ if(_volPct>0) sndOrb(); sl.blur(); });
+  });
+  // clic fuera del control: se cierra
+  document.addEventListener('pointerdown',e=>{
+    const pop=document.getElementById('volpop'), btn=document.getElementById('volbtn');
+    if(pop && pop.style.display==='flex' && !pop.contains(e.target) && e.target!==btn) closeVolPop();
+  });
+  syncVolUI();
+})();
 
 function playTone(opts){
   try{
@@ -2552,7 +2611,7 @@ function getMaster(){
   if(!MUSIC.masterGain){
     const ctx = getMCtx();
     MUSIC.masterGain = ctx.createGain();
-    MUSIC.masterGain.gain.value = _muted ? 0 : MUSIC.musicVol;
+    MUSIC.masterGain.gain.value = musicTarget();
     MUSIC.masterGain.connect(ctx.destination);
   }
   return MUSIC.masterGain;
@@ -2742,6 +2801,7 @@ function scheduleBar(){
 
 function startMusic(theme){
   if(MUSIC.currentTheme === theme) return;
+  MUSIC._stopping = false;
   const ctx = getMCtx();
   if(ctx.state === 'suspended') ctx.resume();
 
@@ -2758,7 +2818,7 @@ function startMusic(theme){
       MUSIC.bar = 0; MUSIC.melodyStep = 0;
       MUSIC.beatTime = getMCtx().currentTime + 0.1;
       master.gain.setValueAtTime(0, getMCtx().currentTime);
-      master.gain.linearRampToValueAtTime(_muted?0:MUSIC.musicVol, getMCtx().currentTime+2.0);
+      master.gain.linearRampToValueAtTime(musicTarget(), getMCtx().currentTime+2.0);
       MUSIC.crossfading = false;
       scheduleBar(); scheduleBar(); // pre-schedule 2 compases
     }, 1600);
@@ -2767,7 +2827,7 @@ function startMusic(theme){
     MUSIC.bar = 0;
     MUSIC.beatTime = now + 0.3;
     master.gain.setValueAtTime(0, now);
-    master.gain.linearRampToValueAtTime(_muted?0:MUSIC.musicVol, now + 2.5);
+    master.gain.linearRampToValueAtTime(musicTarget(), now + 2.5);
     scheduleBar(); scheduleBar();
   }
 
@@ -2783,6 +2843,7 @@ function startMusic(theme){
 function stopMusic(fade=1.5){
   clearInterval(MUSIC.schedulerTimer);
   if(!MUSIC.masterGain) return;
+  MUSIC._stopping = true; // mientras se apaga, el slider de volumen no debe pisar el fade-out
   const ctx = getMCtx();
   const now = ctx.currentTime;
   MUSIC.masterGain.gain.setValueAtTime(MUSIC.masterGain.gain.value, now);
@@ -2790,8 +2851,6 @@ function stopMusic(fade=1.5){
   setTimeout(()=>{ MUSIC.currentTheme = null; }, fade * 1000 + 100);
 }
 
-// Integrar mute con la música
-const _origToggleMute = toggleMute;
 
 
 
@@ -5418,7 +5477,7 @@ function endGame(){
   document.getElementById('gover').style.display='flex';
   document.getElementById('hud').style.display='none';
   document.getElementById('pausebtn').style.display='none';
-  document.getElementById('mutebtn').style.display='none';
+  showVolBtn(false);
   document.getElementById('boss-bar').style.display='none';
   const p=G.p,m=Math.floor(G.time/60),s=Math.floor(G.time%60);
   const xm=p.up.xpm>1?`<br><span class="stat-hi">Bonus XP:</span> x${p.up.xpm.toFixed(1)}`:'';
