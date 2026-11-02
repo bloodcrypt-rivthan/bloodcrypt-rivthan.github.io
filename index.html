@@ -325,6 +325,8 @@ document.addEventListener('keydown',e=>{if(e.key==='F11'){e.preventDefault();tog
 // ─── CONSTANTS ────────────────────────────────────────────────────────────────
 const PI=Math.PI, TILE=32, RW=100, RH=30;
 const HERO_Y_LIMIT=RH*TILE*.38;   // |y| máximo al que puede llegar el héroe (mismo límite que el clamp de movimiento)
+const ORB_FLY_TIME=0.25;          // s que dura la animación del orbe volando hacia el héroe al ser recogido
+const MULTISHOT_MAX=5;            // MULTIDISPARO del Mago: máximo de enemigos a los que dispara a la vez (x5 = 4 mejoras)
 const ORB_SLIDE_SPEED=170;        // px/s a la que un orbe fuera de alcance se desliza hacia el borde más cercano
 const ORB_PICKUP_R=50, BONE_PICKUP_R=24;  // radio base de recogida de orbes de XP (antes 16) y de huesos (Yoko)
 const PICKUP_MAX=5;                       // niveles máximos de la mejora RECOLECCIÓN
@@ -1190,7 +1192,7 @@ function killBoss(){
   // Orbs masivos de XP
   for(let i=0;i<18;i++){
     const ang=rf(0,PI*2), d=rf(10,90);
-    G.orbs.push({x:boss.x+Math.cos(ang)*d,y:boss.y+Math.sin(ang)*d,val:Math.round(boss.xp/18),life:18,pulse:rf(0,PI*2)});
+    G.orbs.push({x:boss.x+Math.cos(ang)*d,y:boss.y+Math.sin(ang)*d,val:Math.round(boss.xp/18),pulse:rf(0,PI*2)});
   }
   // Explosión de sangre/partículas
   spawnBlood(boss.x,boss.y,60,'#9955ee');
@@ -1213,7 +1215,7 @@ function killE(e){
   sndKill();
   spawnBlood(e.x,e.y,20,e.col);
   spParts(e.x,e.y,e.col,16);
-  G.orbs.push({x:e.x,y:e.y,val:e.xp,life:12,pulse:rf(0,PI*2)});
+  G.orbs.push({x:e.x,y:e.y,val:e.xp,pulse:rf(0,PI*2)});
   G.kills++;
   if(p.up.lifesteal) p.hp=Math.min(p.mhp,p.hp+p.up.lifesteal);
   // FURIA: cada kill acumula un pequeño boost de velocidad temporal
@@ -2267,7 +2269,16 @@ function buildPool(){
         };
       })(),
     ] : [
-      {title:'MULTIDISPARO', desc:'Dispara a 1 enemigo extra',  t:'', apply(){p.up.multishot=(p.up.multishot||1)+1}},
+      (()=>{
+        const cur=p.up.multishot||1;
+        return {
+          title:'MULTIDISPARO',
+          desc:'Dispara a '+cur+' → '+Math.min(MULTISHOT_MAX,cur+1)+' enemigos a la vez',
+          t:'',
+          apply(){ p.up.multishot=Math.min(MULTISHOT_MAX,(p.up.multishot||1)+1); },
+          hide(){ return (p.up.multishot||1)>=MULTISHOT_MAX; }
+        };
+      })(),
     ]),
   ];
   return pool;
@@ -2536,7 +2547,10 @@ function sndDamage(){
   playNoise({filterFreq:250,filterType:'lowpass',Q:0.5,vol:0.5,dur:0.14,decay:0.12});
   playTone({type:'sawtooth',freq:90,freq2:50,dur:0.12,vol:0.25,filterFreq:400});
 }
+let lastOrbSndT=0;
 function sndOrb(){
+  const now=performance.now(); if(now-lastOrbSndT<40) return; // varios orbes a la vez: un solo sonido
+  lastOrbSndT=now;
   playTone({type:'sine',freq:1400,freq2:1800,dur:0.10,vol:0.15,attack:0.003,decay:0.09});
 }
 function sndLevelUp(){
@@ -3276,17 +3290,27 @@ function update(dt){
   // Orbes de XP: ya NO se dirigen hacia el héroe; quedan donde cayeron y hay que ir a recogerlos.
   // Si cayeron fuera de la zona alcanzable (más allá de los muros, donde el héroe no puede entrar),
   // se deslizan hacia el borde alcanzable más cercano.
+  // Los orbes NUNCA desaparecen por tiempo: solo al ser recogidos. Al recogerse, la XP se da al instante y el orbe
+  // vuela hacia el héroe (ORB_FLY_TIME) encogiéndose hasta desaparecer.
+  const orbPR=pickupRadius(ORB_PICKUP_R,ORB_PICKUP_GROWTH);
   for(let i=G.orbs.length-1;i>=0;i--){
-    const o=G.orbs[i]; o.life-=dt; o.pulse+=dt*5;
+    const o=G.orbs[i]; o.pulse+=dt*5;
+    if(o.taken){
+      o.tt+=dt;
+      const t=Math.min(1,o.tt/ORB_FLY_TIME), e=t*t;          // acelera al acercarse
+      o.x=o.sx+(p.x-o.sx)*e; o.y=o.sy+(p.y-o.sy)*e;          // apunta a la posición ACTUAL del héroe
+      if(t>=1) G.orbs.splice(i,1);
+      continue;
+    }
     if(o.y>HERO_Y_LIMIT||o.y<-HERO_Y_LIMIT){
       const targetY=o.y>0?HERO_Y_LIMIT:-HERO_Y_LIMIT;
       const dy2=targetY-o.y, step=ORB_SLIDE_SPEED*dt;
       o.y=Math.abs(dy2)<=step?targetY:o.y+Math.sign(dy2)*step;
     }
-    const d=hyp(p.x-o.x,p.y-o.y), pr=pickupRadius(ORB_PICKUP_R,ORB_PICKUP_GROWTH);
-    if(d<pr||o.life<=0){
-      if(d<pr){p.xp+=Math.round(o.val*p.up.xpm);sndOrb();while(p.xp>=p.xpN)triggerLvlUp();}
-      G.orbs.splice(i,1);
+    if(hyp(p.x-o.x,p.y-o.y)<orbPR){
+      o.taken=true; o.tt=0; o.sx=o.x; o.sy=o.y;
+      p.xp+=Math.round(o.val*p.up.xpm); sndOrb();
+      while(p.xp>=p.xpN)triggerLvlUp();
     }
   }
 
@@ -3643,20 +3667,25 @@ function draw(){
   }
 
   // XP orbs — diamante con glow y estela
-  for(const o of G.orbs){
+  // Los orbes ya no caducan, pueden acumularse: solo se dibujan los visibles y el glow (shadowBlur, caro) solo si hay pocos
+  const orbVis=[];
+  for(const o of G.orbs){ const sx=o.x+cx, sy=o.y+cy; if(sx<-40||sx>W+40||sy<-40||sy>H+40) continue; orbVis.push(o); }
+  const orbGlow=orbVis.length<=50;
+  for(const o of orbVis){
     const sx=o.x+cx,sy=o.y+cy;
-    o.pulse+=0; // pulse se actualiza en update
     const pulse=Math.sin(o.pulse)*2;
     const xm=p.up.xpm;
     const gc=xm>2?'#ccff00':xm>1?'#aaff44':'#44ff88';
-    const r=4+pulse*.3;
+    // al ser recogido: se encoge y se desvanece mientras vuela hacia el héroe
+    const tk=o.taken?Math.min(1,o.tt/ORB_FLY_TIME):0;
+    const r=(4+pulse*.3)*(1-.7*tk), oa=1-.6*tk*tk;
     ctx.save();
     // Halo exterior
-    ctx.shadowColor=gc; ctx.shadowBlur=14+pulse;
-    ctx.globalAlpha=0.35;
+    if(orbGlow){ ctx.shadowColor=gc; ctx.shadowBlur=14+pulse; }
+    ctx.globalAlpha=0.35*oa;
     ctx.fillStyle=gc;
     ctx.beginPath(); ctx.arc(sx,sy,r*2.2,0,PI*2); ctx.fill();
-    ctx.globalAlpha=1;
+    ctx.globalAlpha=oa;
     // Forma diamante
     ctx.beginPath();
     ctx.moveTo(sx, sy-r*1.4);
@@ -5452,7 +5481,7 @@ function updateUpgradesPanel(){
   // Furia
   if(up.furyStacks>0) add('🔥','FURIA','x'+up.furyStacks,'rare');
   // Multishot (Mage)
-  if(up.multishot>1) add('➳','MULTI','x'+(up.multishot),'epic');
+  if(up.multishot>1) add('➳','MULTI','x'+(up.multishot),'epic',up.multishot>=MULTISHOT_MAX);
   // Proj speed
   if((up.lightningLevel||0)>0) add('⚡','RAYO','Nv.'+up.lightningLevel,'epic',up.lightningLevel>=LIGHTNING_MAX);
   if((up.pickupLevel||0)>0) add('🧲','RECOLEC.','Nv.'+up.pickupLevel,'common',up.pickupLevel>=PICKUP_MAX);
