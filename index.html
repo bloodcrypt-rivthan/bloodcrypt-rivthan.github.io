@@ -345,6 +345,11 @@ const CONTACT_HIT_MULT=0.25;      // golpe de contacto de un enemigo = ATK × 0.
 const BOSS_CONTACT_HIT_MULT=0.5;  // golpe de contacto del Liche Rey = ATK × mult. de fase × 0.5
 const CONTACT_CROWD_MULT=0.10;    // cada enemigo EXTRA que toca al héroe suma el 10% de su golpe…
 const CONTACT_CROWD_CAP=2;        // …hasta un máximo de +200% del golpe base (3× en total). Pon CONTACT_CROWD_MULT=0 para desactivarlo
+// Proyectiles del Liche Rey (fase 2+). ANTES: anillo en todas direcciones (giratorio) con daño fijo 18.
+// AHORA: abanico APUNTADO AL HÉROE (hacia donde está al disparar) con el doble de daño.
+const BOSS_PROJ_DMG=36;           // daño por proyectil (antes 18; la armadura lo reduce)
+const BOSS_PROJ_SPREAD2=0.9;      // apertura total del abanico en fase 2 (rad ≈ 52°, 5 proyectiles)
+const BOSS_PROJ_SPREAD3=1.2;      // apertura total del abanico en fase 3 (rad ≈ 69°, 8 proyectiles)
 const ARMOR_MAX=0.75;             // tope de reducción de daño por ARMADURA (4 picks de 20%: el 4.º llega justo al tope)
 const ATK_SPEED_PER_PICK=0.2;     // VEL. ATAQUE: +20% de ataques por segundo por mejora (aditivo)
 function heroMoveSpeed(p){ return p.spd+p.up.spd+(G.furyTimer>0?FURY_SPEED_BOOST:0); }
@@ -3384,17 +3389,20 @@ function update(dt){
       const dmgMult=1-Math.min(ARMOR_MAX,p.up.armor||0);
       const phaseDmg=boss.phase===3?boss.atk*2.2:boss.phase===2?boss.atk*1.5:boss.atk;
       p.hp-=phaseDmg*BOSS_CONTACT_HIT_MULT*dmgMult; p.dmgF=.15; p.invT=.32; sndDamage(); addShake(7);
+      if(p.hp<=0){ p.hp=0; endGame(); return; }
     }
 
-    // Boss ranged attack — lanza proyectiles en todas direcciones en fase 2+
+    // Boss ranged attack — abanico de proyectiles apuntado al héroe en fase 2+
     if(boss.phase>=2){
       const pIntv=boss.phase===3?1.0:1.6;
       boss.projTimer-=dt;
       if(boss.projTimer<=0){
         boss.projTimer=pIntv;
         const shots=boss.phase===3?8:5;
+        const spread=boss.phase===3?BOSS_PROJ_SPREAD3:BOSS_PROJ_SPREAD2;
+        const aim=Math.atan2(G.p.y-boss.y,G.p.x-boss.x);   // dirección hacia el héroe en el momento del disparo
         for(let i=0;i<shots;i++){
-          const ang=((PI*2)/shots)*i + boss.animT*.4;
+          const ang=aim+(i-(shots-1)/2)*(spread/(shots-1)); // abanico centrado en el héroe
           const spd=180+boss.phase*40;
           G.bossProjs.push({x:boss.x,y:boss.y,vx:Math.cos(ang)*spd,vy:Math.sin(ang)*spd,life:3.0});
         }
@@ -3475,11 +3483,14 @@ function update(dt){
       const dx=pr.x-p.x, dy=pr.y-p.y;
       if(Math.sqrt(dx*dx+dy*dy)<16 && p.invT<=0){
         const dmgMult=1-Math.min(ARMOR_MAX,p.up.armor||0);
-        p.hp-=18*dmgMult; p.dmgF=.15; p.invT=.38; sndDamage(); addShake(5);
+        p.hp-=BOSS_PROJ_DMG*dmgMult; p.dmgF=.15; p.invT=.38; sndDamage(); addShake(5);
         G.bossProjs.splice(i,1);
+        if(p.hp<=0){ p.hp=0; endGame(); return; }
       }
     }
   }
+  // Red de seguridad: si por cualquier vía la vida llegó a 0 sin comprobarse, se termina la partida
+  if(G.run && G.p.hp<=0){ G.p.hp=0; endGame(); return; }
   updHUD();
 }
 
