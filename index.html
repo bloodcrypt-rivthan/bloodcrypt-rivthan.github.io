@@ -326,10 +326,12 @@ document.addEventListener('keydown',e=>{if(e.key==='F11'){e.preventDefault();tog
 const PI=Math.PI, TILE=32, RW=100, RH=30;
 const HERO_Y_LIMIT=RH*TILE*.38;   // |y| máximo al que puede llegar el héroe (mismo límite que el clamp de movimiento)
 const ORB_SLIDE_SPEED=170;        // px/s a la que un orbe fuera de alcance se desliza hacia el borde más cercano
-const ORB_PICKUP_R=16, BONE_PICKUP_R=24;  // radio base de recogida de orbes de XP y de huesos (Yoko)
+const ORB_PICKUP_R=50, BONE_PICKUP_R=24;  // radio base de recogida de orbes de XP (antes 16) y de huesos (Yoko)
 const PICKUP_MAX=5;                       // niveles máximos de la mejora RECOLECCIÓN
-// Radio de recogida con la mejora RECOLECCIÓN: +150% del radio base por nivel
-function pickupRadius(base){ return base*(1+1.5*((G.p&&G.p.up.pickupLevel)||0)); }
+const ORB_PICKUP_GROWTH=1.0;              // orbes: +100% del radio base por nivel (+50 px): 50, 100, 150, 200, 250, 300 px
+const BONE_PICKUP_GROWTH=1.5;             // huesos de Yoko: +150% por nivel (sin cambios): 24, 60, 96, 132, 168, 204 px
+// Radio de recogida con la mejora RECOLECCIÓN (lvl opcional para consultar otro nivel, p. ej. en el texto de la mejora)
+function pickupRadius(base,growth,lvl){ if(lvl===undefined) lvl=(G.p&&G.p.up.pickupLevel)||0; return base*(1+growth*lvl); }
 const rf=(lo,hi)=>lo+(hi-lo)*Math.random();
 const ri=(lo,hi)=>lo+Math.floor(Math.random()*(hi-lo+1));
 // Velocidad de movimiento actual del héroe (base + mejoras + bonus de FURIA/VELOZ). La usa Lilith para no dejarse escapar.
@@ -1520,7 +1522,7 @@ function updateBones(dt){
     b.life-=dt; b.bob+=dt*2;
     if(b.life<=0){ G.bones.splice(i,1); continue; }
     const d=hyp(b.x-p.x,b.y-p.y);
-    if(d<pickupRadius(BONE_PICKUP_R)){
+    if(d<pickupRadius(BONE_PICKUP_R,BONE_PICKUP_GROWTH)){
       // Desenterrar — efecto aleatorio
       const roll=Math.random();
       if(roll<0.34){
@@ -2151,7 +2153,7 @@ function buildPool(){
       const cur=p.up.pickupLevel||0;
       return {
         title:'RECOLECCIÓN'+(cur>0?` Nv.${cur+1}`:''),
-        desc:'+150% rango para recoger orbes de XP'+(p.yoko?' y huesos':''),
+        desc:'Recogida de orbes '+pickupRadius(ORB_PICKUP_R,ORB_PICKUP_GROWTH,cur)+' → '+pickupRadius(ORB_PICKUP_R,ORB_PICKUP_GROWTH,cur+1)+' px'+(p.yoko?' y huesos':''),
         t:'xp-t',
         apply(){ p.up.pickupLevel=Math.min(PICKUP_MAX,(p.up.pickupLevel||0)+1); },
         hide(){ return (p.up.pickupLevel||0)>=PICKUP_MAX; }
@@ -3281,7 +3283,7 @@ function update(dt){
       const dy2=targetY-o.y, step=ORB_SLIDE_SPEED*dt;
       o.y=Math.abs(dy2)<=step?targetY:o.y+Math.sign(dy2)*step;
     }
-    const d=hyp(p.x-o.x,p.y-o.y), pr=pickupRadius(ORB_PICKUP_R);
+    const d=hyp(p.x-o.x,p.y-o.y), pr=pickupRadius(ORB_PICKUP_R,ORB_PICKUP_GROWTH);
     if(d<pr||o.life<=0){
       if(d<pr){p.xp+=Math.round(o.val*p.up.xpm);sndOrb();while(p.xp>=p.xpN)triggerLvlUp();}
       G.orbs.splice(i,1);
