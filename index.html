@@ -340,6 +340,18 @@ document.addEventListener('keydown',e=>{if(e.key==='F11'){e.preventDefault();tog
 const PI=Math.PI, TILE=32, RW=100, RH=30;
 const HERO_Y_LIMIT=RH*TILE*.38;   // |y| máximo al que puede llegar el héroe (mismo límite que el clamp de movimiento)
 const ORB_FLY_TIME=0.25;          // s que dura la animación del orbe volando hacia el héroe al ser recogido
+const XP_GAIN_PER_PICK=1.2;       // GANANCIA XP: cada mejora multiplica la XP ganada por este factor, compuesto (antes ×1.5 = +50%)
+// ORBE DEL MAGO (ataque básico): impacta y se divide en 2 orbes que buscan OTROS enemigos (66% del daño); al impactar cada uno se divide en 2 más (33%); esos ya desaparecen al impactar.
+const MAGE_SPLIT_FRACS=[0.66,0.33];   // daño de la 1.ª y la 2.ª división, como fracción del daño base
+const MAGE_SPLIT_COUNT=2;             // en cuántos orbes se divide en cada impacto
+const MAGE_SPLIT_RADIUS=240;          // px alrededor del impacto en los que busca nuevos enemigos
+const MAGE_CHILD_SPEED=380;           // velocidad (px/s) de los orbes divididos
+// Para que la división se VEA: en hordas compactas los vecinos están encimados y un hijo impactaba al instante (74% vivía ≤2 frames)
+const MAGE_SPLIT_MIN_DIST=85;         // px: los hijos prefieren enemigos al menos a esta distancia del impacto
+const MAGE_SPLIT_MIN_ANGLE=0.9;       // rad (~50°): los hijos prefieren direcciones distintas entre sí
+const MAGE_FORK_ANGLE=0.55;           // rad (~31°): cada hijo sale abierto hacia un lado (forma de "V") y luego se curva hacia su objetivo
+const MAGE_TURN_RATE=12;              // rad/s: giro máximo del orbe teledirigido
+const MAGE_CHILD_ARM=0.06;            // s tras dividirse en que el hijo no colisiona (le da tiempo a salir del grupo)
 const MULTISHOT_MAX=3;            // MULTIDISPARO del Mago: máximo de enemigos a los que dispara a la vez (x3 = 2 mejoras; antes x5)
 const ORB_SLIDE_SPEED=170;        // px/s a la que un orbe fuera de alcance se desliza hacia el borde más cercano
 const ORB_PICKUP_R=50, BONE_PICKUP_R=24;  // radio base de recogida de orbes de XP (antes 16) y de huesos (Yoko)
@@ -484,7 +496,7 @@ const CHAR_DATA = [
   },
   {
     name:'MAGO', role:'MAGO · A DISTANCIA',
-    desc:'Lanza proyectiles a larga distancia. Frágil pero devastador. Gana multishot con upgrades para arrasar hordas enteras.',
+    desc:'Lanza un orbe arcano que, al impactar, se divide en dos orbes que buscan a otros enemigos, y estos vuelven a dividirse. Frágil pero devastador contra hordas.',
     hp:80, atk:25, spd:170, rng:230,
     hpMax:150, atkMax:50, spdMax:200, rngMax:260,
     col:'#cc44ff', sc:'#661188',
@@ -862,12 +874,59 @@ function doShoot(){
     const len=hyp(target.x-p.x,target.y-p.y)||1;
     const{dmg,isCrit}=calcDmg(p.atk+p.up.atk);
     const speed=(isCrit?400:340);
+    // 'fam' la comparten el orbe y todos sus descendientes: hit = enemigos ya golpeados, claim = objetivos ya elegidos por algún orbe hermano
+    const fam={hit:new Set(),claim:new Set()};
     G.projs.push({x:p.x,y:p.y,
       vx:(target.x-p.x)/len*speed, vy:(target.y-p.y)/len*speed,
       dmg,isCrit,range,tr:0,col:p.col,
-      sz:isCrit?7:5,alive:true,trail:[]});
+      sz:isCrit?7:5,alive:true,trail:[],mage:true,gen:0,fam,hit:fam.hit});
   });
   triggerSprAttack(p);
+}
+// Enemigos (y jefe) vivos cerca de (x,y) que la cadena aún no ha golpeado ni reservado otro orbe (salvo `own`), del más cercano al más lejano
+function mageCandidates(x,y,fam,own){
+  const ok=e=>e.alive&&!fam.hit.has(e)&&(!fam.claim.has(e)||e===own)&&hyp(e.x-x,e.y-y)<=MAGE_SPLIT_RADIUS;
+  const c=G.enemies.filter(ok);
+  const b=G.boss; if(G.bossAlive&&b&&ok(b)) c.push(b);
+  return c.sort((a,b2)=>hyp(a.x-x,a.y-y)-hyp(b2.x-x,b2.y-y));
+}
+// Elige `count` objetivos entre los candidatos (ordenados de cerca a lejos): prefiere los que están a >= MAGE_SPLIT_MIN_DIST del impacto
+// y en direcciones distintas (>= MAGE_SPLIT_MIN_ANGLE entre sí); si no hay suficientes así, completa con los más cercanos.
+function magePickTargets(x,y,cands,count){
+  if(cands.length<=count) return cands.slice();
+  const far=cands.filter(e=>hyp(e.x-x,e.y-y)>=MAGE_SPLIT_MIN_DIST);
+  const pool=far.length>=count?far:cands;
+  const ang=e=>Math.atan2(e.y-y,e.x-x);
+  const sep=(a,b)=>{ let d=Math.abs(a-b); if(d>PI) d=PI*2-d; return d; };
+  const picked=[pool[0]];
+  while(picked.length<count){
+    const rest=pool.filter(e=>!picked.includes(e)); if(!rest.length) break;
+    picked.push(rest.find(e=>picked.every(q=>sep(ang(e),ang(q))>=MAGE_SPLIT_MIN_ANGLE))||rest[0]);
+  }
+  return picked;
+}
+// El orbe `pr` acaba de impactar a `victim`: se divide en hasta 2 orbes que van a por otros enemigos
+function mageSplit(pr,victim){
+  const fam=pr.fam; if(!fam) return;
+  fam.hit.add(victim); if(pr.home) fam.claim.delete(pr.home);          // ya golpeado: ninguna rama de la cadena lo vuelve a golpear
+  const gen=pr.gen||0; if(gen>=MAGE_SPLIT_FRACS.length) return;      // la última generación solo impacta y desaparece
+  const p=G.p, x=victim.x, y=victim.y;
+  const targets=magePickTargets(x,y,mageCandidates(x,y,fam),MAGE_SPLIT_COUNT);
+  if(!targets.length) return;                                         // sin otros enemigos cerca: se acaba aquí
+  const frac=MAGE_SPLIT_FRACS[gen];
+  targets.forEach((t,k)=>{
+    fam.claim.add(t);                                                 // reservado: los orbes hermanos/primos buscarán otro
+    const{dmg,isCrit}=calcDmg(p.atk+p.up.atk);                        // cada orbe hijo tira su propio crítico
+    const base=Math.atan2(t.y-y,t.x-x);
+    const fork=targets.length>1?(k%2===0?1:-1)*MAGE_FORK_ANGLE:0;     // salen abiertos en "V" y se curvan hacia su objetivo
+    const la=base+fork;
+    G.projs.push({x,y,vx:Math.cos(la)*MAGE_CHILD_SPEED,vy:Math.sin(la)*MAGE_CHILD_SPEED,
+      dmg:Math.max(1,Math.round(dmg*frac)),isCrit,range:MAGE_SPLIT_RADIUS*2.2,tr:0,
+      col:gen===0?'#e08bff':'#f3c8ff',sz:gen===0?(isCrit?7:5):(isCrit?6:4.5),alive:true,trail:[],
+      mage:true,gen:gen+1,fam,hit:fam.hit,home:t,arm:MAGE_CHILD_ARM});
+  });
+  spParts(x,y,'#e6aaff',8);
+  (G.splitFx||(G.splitFx=[])).push({x,y,life:.28});                   // anillo de destello en el punto de la división
 }
 // ─── ARQUERO ──────────────────────────────────────────────────────────────────
 const ARROW_SPEED=520, ARROW_PIERCE_DECAY=.85;   // las flechas son rápidas; cada enemigo atravesado resta 15% de daño
@@ -2169,7 +2228,7 @@ function buildPool(){
     {title:'REGEN',          desc:'+2 HP/seg regeneración',     t:'',      apply(){p.up.regen+=2}},
     {title:'VAMPIRO',        desc:'+1.5 HP por enemigo',        t:'',      apply(){p.up.lifesteal=(p.up.lifesteal||0)+1.5}},
     {title:'ARMADURA',       desc:'-20% daño recibido (máx. 75%)', t:'',    apply(){p.up.armor=Math.min(ARMOR_MAX,(p.up.armor||0)+.2)}, hide(){return (p.up.armor||0)>=ARMOR_MAX}},
-    {title:'GANANCIA XP',        desc:'+50% XP de enemigos',        t:'xp-t',  apply(){p.up.xpm*=1.5}},
+    {title:'GANANCIA XP',        desc:'+'+Math.round((XP_GAIN_PER_PICK-1)*100)+'% XP de enemigos', t:'xp-t',  apply(){p.up.xpm*=XP_GAIN_PER_PICK}},
     (()=>{
       const cur=p.up.pickupLevel||0;
       return {
@@ -2295,7 +2354,7 @@ function buildPool(){
           desc:'Dispara a '+cur+' → '+Math.min(MULTISHOT_MAX,cur+1)+' enemigos a la vez',
           t:'',
           apply(){ p.up.multishot=Math.min(MULTISHOT_MAX,(p.up.multishot||1)+1); },
-          hide(){ return (p.up.multishot||1)>=MULTISHOT_MAX; }
+          hide(){ return true; }   // RETIRADA DEL POOL por ahora (el ataque básico del Mago ahora se divide); se reactiva quitando esta línea y restaurando: (p.up.multishot||1)>=MULTISHOT_MAX
         };
       })(),
     ]),
@@ -3169,10 +3228,23 @@ function update(dt){
     if(!pr.alive){G.projs.splice(i,1);continue;}
     pr.trail.push({x:pr.x,y:pr.y});
     if(pr.trail.length>8) pr.trail.shift();
+    if(pr.home){   // orbe dividido: va hacia su objetivo; si este muere en el camino busca otro cercano
+      let t=pr.home;
+      // objetivo inválido: murió, o ya fue golpeado por otra rama de la cadena (no se puede volver a golpear) -> busca otro cercano
+      if(!t.alive||pr.fam.hit.has(t)||(t===G.boss&&!G.bossAlive)){ pr.fam.claim.delete(t); t=mageCandidates(pr.x,pr.y,pr.fam)[0]; pr.home=t||null; if(!t){ pr.alive=false; continue; } pr.fam.claim.add(t); }
+      const hs=hyp(pr.vx,pr.vy)||MAGE_CHILD_SPEED, hd=hyp(t.x-pr.x,t.y-pr.y);
+      const want=Math.atan2(t.y-pr.y,t.x-pr.x), cur=Math.atan2(pr.vy,pr.vx);
+      let da=want-cur; while(da>PI) da-=PI*2; while(da<-PI) da+=PI*2;
+      const maxT=MAGE_TURN_RATE*dt, step=hd<40?da:Math.max(-maxT,Math.min(maxT,da));   // giro limitado (curva en "V"); muy cerca apunta directo para no orbitar
+      pr.vx=Math.cos(cur+step)*hs; pr.vy=Math.sin(cur+step)*hs;
+    }
+    if(pr.arm>0) pr.arm-=dt;
     const ox=pr.x, oy=pr.y;
     pr.x+=pr.vx*dt; pr.y+=pr.vy*dt; pr.tr+=hyp(pr.vx,pr.vy)*dt;
-    if(pr.tr>pr.range){pr.alive=false;continue;}
+    if(pr.tr>pr.range){ if(pr.fam&&pr.home) pr.fam.claim.delete(pr.home); pr.alive=false;continue;}
     for(const e of G.enemies){
+      if(pr.arm>0) break;           // recién dividido: aún no colisiona (le da tiempo a salir del grupo)
+      if(pr.home && e!==pr.home) continue;   // orbe dividido: solo impacta a SU objetivo (atraviesa al resto para que se vea ir a buscarlo)
       if(!e.alive)continue;
       if(pr.hit && pr.hit.has(e)) continue;
       const touched = pr.arrow ? segDist(e.x,e.y,ox,oy,pr.x,pr.y)<e.sz+pr.sz : hyp(pr.x-e.x,pr.y-e.y)<e.sz+pr.sz;
@@ -3183,12 +3255,13 @@ function update(dt){
         spParts(e.x,e.y,pr.isCrit?'#ff8800':(pr.arrow?'#d9c27a':'#cc44ff'),pr.isCrit?10:6);
         if(e.hp<=0) killE(e);
         if(pr.arrow) applyPoison(e);
+        if(pr.mage) mageSplit(pr,e);
         if(pr.pierceLeft>0){ pr.pierceLeft--; pr.hit.add(e); pr.dmg*=pr.pierceDecay; }   // la flecha sigue de largo
         else { pr.alive=false; break; }
       }
     }
     // Proyectil vs Boss
-    if(pr.alive && G.bossAlive && G.boss && G.boss.alive && !(pr.hit && pr.hit.has(G.boss))){
+    if(pr.alive && !(pr.arm>0) && (!pr.home||pr.home===G.boss) && G.bossAlive && G.boss && G.boss.alive && !(pr.hit && pr.hit.has(G.boss))){
       const boss=G.boss;
       const touchedB = pr.arrow ? segDist(boss.x,boss.y,ox,oy,pr.x,pr.y)<boss.sz+pr.sz : hyp(pr.x-boss.x,pr.y-boss.y)<boss.sz+pr.sz;
       if(touchedB){
@@ -3198,6 +3271,7 @@ function update(dt){
         spawnBlood(boss.x,boss.y,pr.isCrit?16:10,'#c8b8ff');
         spParts(boss.x,boss.y,pr.isCrit?'#ff8800':(pr.arrow?'#d9c27a':'#aa66ff'),pr.isCrit?12:7);
         if(pr.arrow) applyPoison(boss);
+        if(pr.mage) mageSplit(pr,boss);
         if(pr.pierceLeft>0){ pr.pierceLeft--; pr.hit.add(boss); pr.dmg*=pr.pierceDecay; }
         else pr.alive=false;
         if(boss.hp<=0) killBoss();
@@ -3350,6 +3424,7 @@ function update(dt){
     if(b.life<=0)G.bloodSplats.splice(i,1);
   }
   for(let i=G.meleeEff.length-1;i>=0;i--){G.meleeEff[i].life-=dt;if(G.meleeEff[i].life<=0)G.meleeEff.splice(i,1);}
+  if(G.splitFx) for(let i=G.splitFx.length-1;i>=0;i--){G.splitFx[i].life-=dt;if(G.splitFx[i].life<=0)G.splitFx.splice(i,1);}
   if(G.spectralFX) for(let i=G.spectralFX.length-1;i>=0;i--){G.spectralFX[i].life-=dt;if(G.spectralFX[i].life<=0)G.spectralFX.splice(i,1);}
   updateLightning(dt);
   for(let i=G.lightningFX.length-1;i>=0;i--){
@@ -3635,6 +3710,14 @@ function draw(){
     ctx.restore();
   }
 
+  // Anillo de destello de la división de los orbes del Mago
+  if(G.splitFx) for(const sf of G.splitFx){
+    const t=sf.life/.28, r=7+(1-t)*26;
+    ctx.save(); ctx.globalAlpha=t*.85; ctx.strokeStyle='#f0c8ff'; ctx.lineWidth=1+t*2.5;
+    ctx.beginPath(); ctx.arc(sf.x+cx,sf.y+cy,r,0,PI*2); ctx.stroke();
+    ctx.globalAlpha=t*.9; ctx.fillStyle='#ffffff'; ctx.beginPath(); ctx.arc(sf.x+cx,sf.y+cy,3*t+1,0,PI*2); ctx.fill();
+    ctx.restore();
+  }
   // Melee ring — anillo expansivo con glow
   for(const ef of G.meleeEff){
     const sx=ef.x+cx,sy=ef.y+cy;
