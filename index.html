@@ -191,6 +191,24 @@ canvas{display:block}
 #joystick-toggle{background:rgba(15,15,15,.9);border:1px solid #333;color:#666;font-family:'Courier New',monospace;font-size:11px;padding:7px 20px;cursor:pointer;letter-spacing:1px;transition:all .2s;margin-top:6px}
 #joystick-toggle:hover{border-color:#888;color:#ccc}
 #joystick-toggle.active{border-color:#44ffaa;color:#44ffaa}
+
+/* RÉCORDS / ORO */
+#sgold-row{color:#ffcc44!important}
+#char-best{color:#a8873a;font-size:11px;letter-spacing:1px;border-top:1px solid #1a1a1a;padding-top:8px}
+#records{display:none;flex-direction:column;align-items:center;justify-content:flex-start;background:rgba(0,0,0,.96);overflow-y:auto;padding:24px 12px;z-index:60}
+#records h2{color:#e8d5a3;letter-spacing:6px;font-size:20px;margin-bottom:14px;text-shadow:0 0 16px #c0392b}
+#rec-body{width:100%;max-width:640px;color:#999;font-size:12px}
+#rec-body h3{color:#c0392b;font-size:12px;letter-spacing:3px;margin:18px 0 6px;border-bottom:1px solid #222;padding-bottom:4px}
+.rec-tbl{width:100%;border-collapse:collapse}
+.rec-tbl th{color:#555;font-weight:normal;font-size:10px;letter-spacing:1px;text-align:right;padding:4px 6px}
+.rec-tbl td{text-align:right;padding:5px 6px;border-top:1px solid #151515;color:#bbb}
+.rec-tbl th:first-child,.rec-tbl td:first-child{text-align:left}
+.rec-tbl td:first-child{color:#e8d5a3}
+.rec-gold{color:#ffcc44!important}
+.rec-tot{display:flex;gap:18px;flex-wrap:wrap;justify-content:space-between;color:#bbb}
+.rec-tot b{color:#e8d5a3}
+.rec-btns{display:flex;gap:8px;flex-wrap:wrap;justify-content:center;margin-top:18px}
+.stat-new{color:#ffcc44;font-weight:bold;letter-spacing:1px}
 </style>
 </head>
 <body>
@@ -217,6 +235,7 @@ canvas{display:block}
   <div id="hud-right">
     <div id="wave-label">OLEADA <span id="swave">1</span></div>
     <div>Bajas: <span id="skills">0</span></div>
+    <div id="sgold-row">🪙 Oro: <span id="sgold">0</span></div>
     <div>Tiempo: <span id="stime">0:00</span></div>
   </div>
   <!-- Boss HP bar -->
@@ -275,6 +294,7 @@ canvas{display:block}
               <div class="stat-row"><span class="stat-label">ALC</span><div class="stat-bar-bg"><div class="stat-bar-fill" id="sb-rng" style="width:25%;background:#9b59b6"></div></div><span class="stat-val" id="sv-rng">62</span></div>
             </div>
             <div id="char-desc">Guerrero cuerpo a cuerpo con alta salud. Golpea a todos los enemigos en su radio con cada ataque.</div>
+            <div id="char-best"></div>
           </div>
         </div>
       </div>
@@ -289,6 +309,7 @@ canvas{display:block}
     </div>
   </div>
   <button class="start-btn" onclick="startGame()">▶  INICIAR PARTIDA</button>
+  <button class="sec-btn" onclick="openRecords()">🏆 RÉCORDS</button>
   <div class="menu-hint">WASD MOVER · ATAQUES AUTOMÁTICOS · ESC PAUSAR · F11 PANTALLA COMPLETA</div>
 </div>
 
@@ -323,6 +344,18 @@ canvas{display:block}
   <button class="sec-btn" onclick="goMenu()" style="margin-top:10px">↩  MENÚ</button>
 </div>
 
+<!-- RÉCORDS -->
+<div class="scrim" id="records">
+  <h2>🏆 RÉCORDS</h2>
+  <div id="rec-body"></div>
+  <div class="rec-btns">
+    <button class="sec-btn" onclick="exportSave()">📋 EXPORTAR</button>
+    <button class="sec-btn" onclick="importSave()">📥 IMPORTAR</button>
+    <button class="sec-btn" onclick="resetSave()">🗑 BORRAR</button>
+    <button class="start-btn" style="padding:8px 28px;font-size:12px" onclick="closeRecords()">↩ VOLVER</button>
+  </div>
+</div>
+
 <script>
 // ─── CANVAS SETUP ─────────────────────────────────────────────────────────────
 const canvas = document.getElementById('c');
@@ -340,6 +373,7 @@ document.addEventListener('keydown',e=>{if(e.key==='F11'){e.preventDefault();tog
 const PI=Math.PI, TILE=32, RW=100, RH=30;
 const HERO_Y_LIMIT=RH*TILE*.38;   // |y| máximo al que puede llegar el héroe (mismo límite que el clamp de movimiento)
 const ORB_FLY_TIME=0.25;          // s que dura la animación del orbe volando hacia el héroe al ser recogido
+const RANGE_MAX=6;                // niveles máximos de ALCANCE+ (6 mejoras de +25% compuesto = ×3.81)
 const XP_GAIN_PER_PICK=1.2;       // GANANCIA XP: cada mejora multiplica la XP ganada por este factor, compuesto (antes ×1.5 = +50%)
 // ORBE DEL MAGO (ataque básico): impacta y se divide en 2 orbes que buscan OTROS enemigos (66% del daño); al impactar cada uno se divide en 2 más (33%); esos ya desaparecen al impactar.
 const MAGE_SPLIT_FRACS=[0.66,0.33];   // daño de la 1.ª y la 2.ª división, como fracción del daño base
@@ -561,6 +595,8 @@ function updateCharCard(){
   document.getElementById('char-title').textContent = d.name;
   document.getElementById('char-role').textContent = d.role;
   document.getElementById('char-desc').textContent = d.desc;
+  { const b=loadSave().best[CHARS[selChar].name], el=document.getElementById('char-best');
+    el.textContent=b?('🏆 MEJOR: '+fmtT(b.time)+' · '+b.kills+' bajas · '+b.gold+' oro'):'🏆 Sin partidas aún'; }
 
   // Stats bars
   const stats = [
@@ -701,8 +737,92 @@ function dbgSyncRerollBtn(){
 }
 // ============ FIN DEBUG PANEL ============
 
+// ─── GUARDADO DE PROGRESO / RÉCORDS ───────────────────────────────────────────
+// Se guarda en localStorage: es propio de cada navegador y de cada origen, así que cada persona que juegue
+// desde https://bloodcrypt-rivthan.github.io/ tiene sus propios récords, sin mezclarse con los de nadie.
+const SAVE_KEY='bloodcrypt_save_v1', MAX_RUNS=30, MIN_RUN_TIME=5;
+const GOLD_DROP_CHANCE=.25;      // probabilidad de que un enemigo suelte una moneda
+const GOLD_BOSS_COINS=12, GOLD_BOSS_VAL=10;
+function emptySave(){ return {v:1,runs:[],totals:{runs:0,time:0,kills:0,gold:0},best:{}}; }
+function num(x,max){ x=Number(x); return (isFinite(x)&&x>0)?Math.min(Math.floor(x),max||1e9):0; }
+function sanitizeSave(d){
+  const o=emptySave(); if(!d||typeof d!=='object'||d.v!==1) return null;
+  if(d.totals) for(const k of ['runs','time','kills','gold']) o.totals[k]=num(d.totals[k],1e10);
+  if(d.best&&typeof d.best==='object') for(const n of Object.keys(d.best).slice(0,20)){
+    const b=d.best[n]; if(!b||typeof b!=='object') continue;
+    o.best[String(n).slice(0,20)]={time:num(b.time,1e6),kills:num(b.kills),gold:num(b.gold),lv:num(b.lv,999),wave:num(b.wave,999),runs:num(b.runs)};
+  }
+  if(Array.isArray(d.runs)) for(const r of d.runs.slice(0,MAX_RUNS)){
+    if(!r||typeof r!=='object') continue;
+    o.runs.push({ch:String(r.ch||'?').slice(0,20),time:num(r.time,1e6),kills:num(r.kills),gold:num(r.gold),lv:num(r.lv,999),wave:num(r.wave,999),res:r.res==='quit'?'quit':'dead',t:num(r.t,1e14)});
+  }
+  return o;
+}
+function loadSave(){
+  try{ const raw=localStorage.getItem(SAVE_KEY); if(raw){ const d=sanitizeSave(JSON.parse(raw)); if(d) return d; } }catch(e){}
+  return emptySave();
+}
+function writeSave(d){ try{ localStorage.setItem(SAVE_KEY,JSON.stringify(d)); return true; }catch(e){ return false; } }
+function esc(t){ return String(t).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+function fmtT(t){ t=Math.floor(t); return Math.floor(t/60)+':'+String(t%60).padStart(2,'0'); }
+function fmtTLong(t){ t=Math.floor(t); const h=Math.floor(t/3600),m=Math.floor(t%3600/60); return h>0?h+'h '+m+'m':m+'m '+(t%60)+'s'; }
+
+// Registra la partida en curso (una sola vez). Devuelve qué récords personales se batieron.
+function saveRun(res){
+  if(!G||!G.p||G.saved||G.time<MIN_RUN_TIME) return null;
+  G.saved=true;
+  const p=G.p, d=loadSave();
+  const run={ch:p.name,time:Math.floor(G.time),kills:G.kills|0,gold:G.gold|0,lv:p.lv|0,wave:G.wave|0,res,t:Date.now()};
+  const prev=d.best[p.name], isFirst=!prev;
+  const b=prev||{time:0,kills:0,gold:0,lv:0,wave:0,runs:0};
+  const nw={time:run.time>b.time,kills:run.kills>b.kills,gold:run.gold>b.gold};
+  for(const k of ['time','kills','gold','lv','wave']) if(run[k]>b[k]) b[k]=run[k];
+  b.runs++; d.best[p.name]=b;
+  d.runs.unshift(run); d.runs.length=Math.min(d.runs.length,MAX_RUNS);
+  d.totals.runs++; d.totals.time+=run.time; d.totals.kills+=run.kills; d.totals.gold+=run.gold;
+  writeSave(d);
+  return isFirst?{time:false,kills:false,gold:false,first:true}:nw;
+}
+window.addEventListener('pagehide',()=>{ if(G&&G.run) saveRun('quit'); });
+document.addEventListener('visibilitychange',()=>{ if(document.visibilityState==='hidden'&&G&&G.run) saveRun('quit'); });
+
+function openRecords(){
+  const d=loadSave(), T=d.totals;
+  let h='<h3>TOTAL ACUMULADO</h3><div class="rec-tot"><span>Partidas: <b>'+T.runs+'</b></span><span>Tiempo: <b>'+fmtTLong(T.time)+'</b></span><span>Bajas: <b>'+T.kills+'</b></span><span class="rec-gold">🪙 Oro: <b class="rec-gold">'+T.gold+'</b></span></div>';
+  h+='<h3>MEJOR MARCA POR PERSONAJE</h3><table class="rec-tbl"><tr><th>PERSONAJE</th><th>TIEMPO</th><th>BAJAS</th><th>ORO</th><th>NIVEL</th><th>OLEADA</th><th>PARTIDAS</th></tr>';
+  for(const c of CHARS){
+    const b=d.best[c.name];
+    h+= b? '<tr><td>'+esc(c.name)+'</td><td>'+fmtT(b.time)+'</td><td>'+b.kills+'</td><td class="rec-gold">'+b.gold+'</td><td>'+b.lv+'</td><td>'+b.wave+'</td><td>'+b.runs+'</td></tr>'
+           : '<tr><td>'+esc(c.name)+'</td><td colspan="6" style="color:#444">sin partidas</td></tr>';
+  }
+  h+='</table><h3>ÚLTIMAS PARTIDAS</h3>';
+  if(!d.runs.length) h+='<div style="color:#444">Aún no hay partidas registradas.</div>';
+  else{
+    h+='<table class="rec-tbl"><tr><th>PERSONAJE</th><th>TIEMPO</th><th>BAJAS</th><th>ORO</th><th>NIVEL</th><th>FIN</th></tr>';
+    for(const r of d.runs.slice(0,12)) h+='<tr><td>'+esc(r.ch)+'</td><td>'+fmtT(r.time)+'</td><td>'+r.kills+'</td><td class="rec-gold">'+r.gold+'</td><td>'+r.lv+'</td><td>'+(r.res==='quit'?'abandonó':'murió')+'</td></tr>';
+    h+='</table>';
+  }
+  document.getElementById('rec-body').innerHTML=h;
+  document.getElementById('records').style.display='flex';
+}
+function closeRecords(){ document.getElementById('records').style.display='none'; updateCharCard(); }
+function exportSave(){
+  const code=btoa(JSON.stringify(loadSave()));
+  (navigator.clipboard&&navigator.clipboard.writeText?navigator.clipboard.writeText(code):Promise.reject()).then(
+    ()=>alert('Código de guardado copiado al portapapeles.\nPégalo con IMPORTAR en otro navegador o dispositivo.'),
+    ()=>prompt('Copia este código de guardado:',code));
+}
+function importSave(){
+  const code=prompt('Pega tu código de guardado.\nATENCIÓN: reemplaza los récords actuales de este navegador.'); if(!code) return;
+  try{ const d=sanitizeSave(JSON.parse(atob(code.trim()))); if(!d) throw 0; writeSave(d); openRecords(); }
+  catch(e){ alert('Código inválido.'); }
+}
+function resetSave(){ if(confirm('¿Borrar TODOS los récords de este navegador? No se puede deshacer.')){ try{localStorage.removeItem(SAVE_KEY);}catch(e){} openRecords(); } }
+
 function goMenu(){
+  if(G&&G.run) saveRun('quit');
   paused=false; G.run=false;
+  document.getElementById('records').style.display='none';
   stopMusic(1.2);
   ['pausemenu','gover','lvlup'].forEach(id=>document.getElementById(id).style.display='none');
   document.getElementById('menu').style.display='flex';
@@ -732,7 +852,7 @@ function restartGame(){document.getElementById('gover').style.display='none'; st
 
 function initG(){
   const ch=CHARS[selChar];
-  G={run:true,time:0,kills:0,wave:1,spT:0,spI:2.2,cam:{x:0,y:0},lvlPending:false,totalCrits:0,rerollsLeft:0,furyTimer:0,skeletons:[],summonTimer:0,boss:null,bossAlive:false,bossAnnounce:0,bossSpawned:false,bossProjs:[],eProjs:[],thralls:[],thrallProjs:[],spectralFX:[],lightningFX:[],lightningT:0,shurAng:0,shurPts:[],arrowQueue:[],stealthT:4,invisPos:{x:0,y:0},rains:[],rainArrows:[],rainT:3,traps:[],trapFX:[],trapT:3,bones:[],shake:0,shakeX:0,shakeY:0,lvlUpFlash:0,
+  G={run:true,time:0,kills:0,gold:0,saved:false,wave:1,spT:0,spI:2.2,cam:{x:0,y:0},lvlPending:false,totalCrits:0,rerollsLeft:0,furyTimer:0,skeletons:[],summonTimer:0,boss:null,bossAlive:false,bossAnnounce:0,bossSpawned:false,bossProjs:[],eProjs:[],thralls:[],thrallProjs:[],spectralFX:[],lightningFX:[],lightningT:0,shurAng:0,shurPts:[],arrowQueue:[],stealthT:4,invisPos:{x:0,y:0},rains:[],rainArrows:[],rainT:3,traps:[],trapFX:[],trapT:3,bones:[],shake:0,shakeX:0,shakeY:0,lvlUpFlash:0,
     lilith:null,lilithAlive:false,lilithSpawned:false,lilithAnnounce:0,
     p:{x:0,y:0,hp:ch.hp,mhp:ch.hp,atk:ch.atk,spd:ch.spd,range:ch.range,rate:ch.rate,
        atkt:0,melee:ch.melee,col:ch.col,sc:ch.sc,name:ch.name,
@@ -1272,6 +1392,7 @@ function killBoss(){
     const ang=rf(0,PI*2), d=rf(10,90);
     G.orbs.push({x:boss.x+Math.cos(ang)*d,y:boss.y+Math.sin(ang)*d,val:Math.round(boss.xp/18),pulse:rf(0,PI*2)});
   }
+  for(let i=0;i<GOLD_BOSS_COINS;i++){ const ang=rf(0,PI*2), d=rf(10,100); G.orbs.push({x:boss.x+Math.cos(ang)*d,y:boss.y+Math.sin(ang)*d,val:GOLD_BOSS_VAL,gold:true,pulse:rf(0,PI*2)}); }
   // Explosión de sangre/partículas
   spawnBlood(boss.x,boss.y,60,'#9955ee');
   spParts(boss.x,boss.y,'#c8b8ff',40);
@@ -1294,6 +1415,7 @@ function killE(e){
   spawnBlood(e.x,e.y,20,e.col);
   spParts(e.x,e.y,e.col,16);
   G.orbs.push({x:e.x,y:e.y,val:e.xp,pulse:rf(0,PI*2)});
+  if(Math.random()<GOLD_DROP_CHANCE) G.orbs.push({x:e.x+rf(-8,8),y:e.y+rf(-8,8),val:Math.max(1,Math.round(e.xp/4)),gold:true,pulse:rf(0,PI*2)});
   G.kills++;
   if(p.up.lifesteal) p.hp=Math.min(p.mhp,p.hp+p.up.lifesteal);
   // FURIA: cada kill acumula un pequeño boost de velocidad temporal
@@ -2223,7 +2345,7 @@ function buildPool(){
     {title:'ATAQUE+',        desc:'+10 daño de ataque',         t:'',      apply(){p.up.atk+=10}},
     {title:'VIDA+',        desc:'+40 HP máx + curación',      t:'',      apply(){p.mhp+=40;p.hp=Math.min(p.mhp,p.hp+40)}},
     {title:'VEL. MOVIMIENTO',desc:'+25 vel. de movimiento',     t:'',      apply(){p.up.spd+=25}},
-    {title:'ALCANCE+',       desc:'+25% alcance/radio ataque',  t:'',      apply(){p.up.rng*=1.25}},
+    {title:'ALCANCE+',       desc:'+25% alcance/radio ataque (Nv.'+((p.up.rngLevel||0)+1)+'/'+RANGE_MAX+')', t:'', apply(){ if((p.up.rngLevel||0)>=RANGE_MAX) return; p.up.rngLevel=(p.up.rngLevel||0)+1; p.up.rng*=1.25; }, hide(){ return (p.up.rngLevel||0)>=RANGE_MAX; }},
     {title:'VEL. ATAQUE',    desc:'+20% velocidad de ataque',   t:'',      apply(){p.up.rate+=ATK_SPEED_PER_PICK}},
     {title:'REGEN',          desc:'+2 HP/seg regeneración',     t:'',      apply(){p.up.regen+=2}},
     {title:'VAMPIRO',        desc:'+1.5 HP por enemigo',        t:'',      apply(){p.up.lifesteal=(p.up.lifesteal||0)+1.5}},
@@ -3402,8 +3524,9 @@ function update(dt){
     }
     if(hyp(p.x-o.x,p.y-o.y)<orbPR){
       o.taken=true; o.tt=0; o.sx=o.x; o.sy=o.y;
-      p.xp+=Math.round(o.val*p.up.xpm); sndOrb();
-      while(p.xp>=p.xpN)triggerLvlUp();
+      if(o.gold){ G.gold+=o.val; sndOrb(); }
+      else{ p.xp+=Math.round(o.val*p.up.xpm); sndOrb();
+      while(p.xp>=p.xpN)triggerLvlUp(); }
     }
   }
 
@@ -3783,7 +3906,7 @@ function draw(){
     const sx=o.x+cx,sy=o.y+cy;
     const pulse=Math.sin(o.pulse)*2;
     const xm=p.up.xpm;
-    const gc=xm>2?'#ccff00':xm>1?'#aaff44':'#44ff88';
+    const gc=o.gold?'#ffcc33':xm>2?'#ccff00':xm>1?'#aaff44':'#44ff88';
     // al ser recogido: se encoge y se desvanece mientras vuela hacia el héroe
     const tk=o.taken?Math.min(1,o.tt/ORB_FLY_TIME):0;
     const r=(4+pulse*.3)*(1-.7*tk), oa=1-.6*tk*tk;
@@ -3796,11 +3919,13 @@ function draw(){
     ctx.globalAlpha=oa;
     // Forma diamante
     ctx.beginPath();
+    if(o.gold){ ctx.arc(sx,sy,r*1.15,0,PI*2); }   // moneda de oro: círculo
+    else{
     ctx.moveTo(sx, sy-r*1.4);
     ctx.lineTo(sx+r, sy);
     ctx.lineTo(sx, sy+r*1.4);
     ctx.lineTo(sx-r, sy);
-    ctx.closePath();
+    ctx.closePath(); }
     ctx.fillStyle=gc; ctx.fill();
     // Brillo interior
     ctx.shadowBlur=0;
@@ -5576,6 +5701,7 @@ function updHUD(){
   document.getElementById('xptxt').textContent=p.xp+'/'+p.xpN;
   document.getElementById('hlv').textContent=p.lv;
   document.getElementById('skills').textContent=G.kills;
+  document.getElementById('sgold').textContent=G.gold|0;
   const m=Math.floor(G.time/60),s=Math.floor(G.time%60);
   document.getElementById('stime').textContent=m+':'+String(s).padStart(2,'0');
   document.getElementById('swave').textContent=G.wave;
@@ -5644,7 +5770,7 @@ function updateUpgradesPanel(){
   // Rate de ataque
   if(up.rate>0) add('⚡','ATQ/S','+'+pct(up.rate),'common');
   // Alcance
-  if(up.rng>1) add('🎯','ALC','x'+up.rng.toFixed(1),'common');
+  if(up.rng>1) add('🎯','ALC','Nv.'+(up.rngLevel||0)+' x'+up.rng.toFixed(1),'common',(up.rngLevel||0)>=RANGE_MAX);
   // Regen
   if(up.regen>0) add('💚','REGEN','+'+up.regen.toFixed(1)+'/s','rare');
   // Armadura
@@ -5697,6 +5823,7 @@ function updateUpgradesPanel(){
 function endGame(){
   sndDeath(); stopMusic(2.0);
   G.run=false;
+  const nr=saveRun('dead');
   document.getElementById('gover').style.display='flex';
   document.getElementById('hud').style.display='none';
   document.getElementById('pausebtn').style.display='none';
@@ -5709,7 +5836,10 @@ function endGame(){
   document.getElementById('gstats').innerHTML=
     `Tiempo: <span class="stat-hi">${m}:${String(s).padStart(2,'0')}</span><br>`+
     `Enemigos: <span class="stat-hi">${G.kills}</span>${cr}<br>`+
-    `Nivel: <span class="stat-hi">${p.lv}</span> · Oleada: <span class="stat-hi">${G.wave}</span>`+xm+crS;
+    `Oro: <span class="stat-hi" style="color:#ffcc44">🪙 ${G.gold}</span><br>`+
+    `Nivel: <span class="stat-hi">${p.lv}</span> · Oleada: <span class="stat-hi">${G.wave}</span>`+xm+crS+
+    (nr?(nr.first?'<br><span class="stat-new">★ PRIMERA PARTIDA CON '+esc(p.name)+' ★</span>':
+       (nr.time?'<br><span class="stat-new">★ NUEVO RÉCORD DE TIEMPO ★</span>':'')+(nr.kills?'<br><span class="stat-new">★ NUEVO RÉCORD DE BAJAS ★</span>':'')+(nr.gold?'<br><span class="stat-new">★ NUEVO RÉCORD DE ORO ★</span>':'')):'');
 }
 
 // ─── BOOT ─────────────────────────────────────────────────────────────────────
