@@ -1,0 +1,144 @@
+{
+  "caminar": {
+    "cuadros": 12,
+    "celda": [
+      256,
+      160
+    ],
+    "hoja": [
+      3072,
+      160
+    ],
+    "ancla": [
+      128,
+      160
+    ],
+    "duraciones_ms": [
+      50,
+      50,
+      50,
+      50,
+      50,
+      50,
+      50,
+      50,
+      50,
+      50,
+      50,
+      50
+    ],
+    "bucle": true,
+    "mantener_ultimo": false
+  },
+  "reposo": {
+    "cuadros": 6,
+    "celda": [
+      256,
+      160
+    ],
+    "hoja": [
+      1536,
+      160
+    ],
+    "ancla": [
+      128,
+      160
+    ],
+    "duraciones_ms": [
+      200,
+      200,
+      200,
+      200,
+      200,
+      200
+    ],
+    "bucle": true,
+    "mantener_ultimo": false
+  },
+  "ataque": {
+    "cuadros": 14,
+    "celda": [
+      256,
+      160
+    ],
+    "hoja": [
+      3584,
+      160
+    ],
+    "ancla": [
+      128,
+      160
+    ],
+    "duraciones_ms": [
+      15,
+      15,
+      15,
+      20,
+      15,
+      20,
+      60,
+      60,
+      50,
+      40,
+      35,
+      35,
+      35,
+      35
+    ],
+    "bucle": false,
+    "mantener_ultimo": false,
+    "cuadro_impacto": 7
+  },
+  "golpeado": {
+    "cuadros": 4,
+    "celda": [
+      256,
+      160
+    ],
+    "hoja": [
+      1024,
+      160
+    ],
+    "ancla": [
+      128,
+      160
+    ],
+    "duraciones_ms": [
+      45,
+      75,
+      75,
+      45
+    ],
+    "bucle": false,
+    "mantener_ultimo": false
+  },
+  "muerte": {
+    "cuadros": 10,
+    "celda": [
+      256,
+      160
+    ],
+    "hoja": [
+      2560,
+      160
+    ],
+    "ancla": [
+      128,
+      160
+    ],
+    "duraciones_ms": [
+      80,
+      80,
+      80,
+      80,
+      80,
+      80,
+      80,
+      80,
+      80,
+      80
+    ],
+    "bucle": false,
+    "mantener_ultimo": true
+  }
+}
