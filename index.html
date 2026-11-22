@@ -28,15 +28,16 @@ canvas{display:block}
 .stat-upg-row.stat-rare{color:#88aaff}
 .stat-upg-row.stat-epic{color:#cc88ff}
 .stat-upg-row.stat-gold{color:#ffcc44}
-/* Mejora al nivel máximo: las letras pulsan entre su color y dorado */
+/* Mejora al nivel máximo: texto dorado con pulso de brillo */
 .stat-upg-row.stat-common{--tc:#888}
 .stat-upg-row.stat-rare{--tc:#88aaff}
 .stat-upg-row.stat-epic{--tc:#cc88ff}
 .stat-upg-row.stat-gold{--tc:#ffcc44}
-@keyframes upgMaxGlow{0%,100%{color:var(--tc);text-shadow:0 0 6px rgba(0,0,0,.8)}50%{color:#ffd700;text-shadow:0 0 8px rgba(255,200,40,.85),0 0 2px rgba(0,0,0,.8)}}
-@keyframes upgMaxGlowVal{0%,100%{color:#e8d5a3;text-shadow:0 0 6px rgba(0,0,0,.8)}50%{color:#ffd700;text-shadow:0 0 8px rgba(255,200,40,.85),0 0 2px rgba(0,0,0,.8)}}
-.stat-upg-row.maxed{animation:upgMaxGlow 1.6s ease-in-out infinite}
-.stat-upg-row.maxed .stat-upg-val{animation:upgMaxGlowVal 1.6s ease-in-out infinite;animation-delay:inherit}
+/* Pulso compuesto en GPU: solo anima opacity de una capa; el texto queda en dorado fijo (antes animaba color/text-shadow y repintaba cada frame) */
+@keyframes upgMaxPulse{0%,100%{opacity:0}50%{opacity:1}}
+.stat-upg-row.maxed{position:relative;color:#ffd700}
+.stat-upg-row.maxed .stat-upg-val{color:#ffd700}
+.stat-upg-row.maxed::after{content:'';position:absolute;inset:0;pointer-events:none;border-radius:2px;background:rgba(255,200,40,.16);box-shadow:0 0 8px rgba(255,200,40,.55);opacity:0;will-change:opacity;animation:upgMaxPulse 1.6s ease-in-out infinite;animation-delay:var(--gd,0s)}
 #char-name{color:#e8d5a3;font-size:13px;letter-spacing:2px;text-shadow:0 0 8px #c0392b88;margin-bottom:6px}
 .hbar-wrap{position:relative;width:180px;height:14px;background:#0e0000;border:1px solid #c0392b44;margin-bottom:4px}
 .hbar-fill{height:100%;transition:width .12s;position:relative}
@@ -74,6 +75,7 @@ canvas{display:block}
 #debug-panel button{background:rgba(80,0,0,.85);border:1px solid #a33;color:#fdd;font-size:11px;padding:4px 8px;cursor:pointer;border-radius:3px;font-family:'Courier New',monospace;white-space:nowrap}
 #debug-panel button:hover:not(:disabled){background:rgba(140,0,0,.9)}
 #debug-panel button:disabled{opacity:.35;cursor:not-allowed}
+#dbg-auto-lbl{background:rgba(80,0,0,.85);border:1px solid #a33;color:#fdd;font-size:11px;padding:4px 8px;cursor:pointer;border-radius:3px;font-family:'Courier New',monospace;display:flex;align-items:center;gap:4px;user-select:none}
 /* ============ FIN DEBUG PANEL ============ */
 #pausebtn:hover{border-color:#c0392b;color:#fff}
 #volbtn{position:absolute;top:12px;right:48px;background:rgba(10,0,0,.8);border:1px solid #444;color:#aaa;font-size:15px;width:30px;height:30px;cursor:pointer;pointer-events:all;display:none;line-height:30px;text-align:center;transition:all .2s}
@@ -268,6 +270,7 @@ canvas{display:block}
   <button onclick="debugSkipToBoss()">👑 BOSS</button>
   <button onclick="debugSkipToLilith()">🩸 LILITH</button>
   <button id="dbg-reroll-btn" onclick="debugAddReroll()" disabled>🎲 REROLL+</button>
+  <label id="dbg-auto-lbl"><input type="checkbox" id="dbg-auto" onchange="dbgAutoPick()"> 🤖 AUTO-MEJORA</label>
 </div>
 <!-- ============ FIN DEBUG PANEL ============ -->
 
@@ -370,7 +373,8 @@ canvas{display:block}
 // ─── CANVAS SETUP ─────────────────────────────────────────────────────────────
 const canvas = document.getElementById('c');
 let ctx = canvas.getContext('2d');
-function resize(){canvas.width=window.innerWidth;canvas.height=window.innerHeight;}
+var _redraw=true; // ver loop(): redibujo de escenas estáticas
+function resize(){canvas.width=window.innerWidth;canvas.height=window.innerHeight;_redraw=true;}
 resize(); window.addEventListener('resize',resize);
 
 function toggleFS(){
@@ -424,6 +428,8 @@ const ARMOR_MAX=0.75;             // tope de reducción de daño por ARMADURA (4
 const ATK_SPEED_PER_PICK=0.2;     // VEL. ATAQUE: +20% de ataques por segundo por mejora (aditivo)
 function heroMoveSpeed(p){ return p.spd+p.up.spd+(G.furyTimer>0?FURY_SPEED_BOOST:0); }
 const hyp=(dx,dy)=>Math.sqrt(dx*dx+dy*dy);
+// Comparador por cercanía a (x,y) con distancia al cuadrado: mismo orden que hyp() sin calcular raíces dentro del sort
+const _byDist2=(x,y)=>(a,b)=>{ const ax=a.x-x, ay=a.y-y, bx=b.x-x, by=b.y-y; return (ax*ax+ay*ay)-(bx*bx+by*by); };
 const clamp=(v,lo,hi)=>Math.max(lo,Math.min(hi,v));
 
 // ─── CHARACTER & ENEMY DEFS ───────────────────────────────────────────────────
@@ -753,6 +759,16 @@ function dbgSyncRerollBtn(){
   const b=document.getElementById('dbg-reroll-btn');
   if(b) b.disabled=!(G && G.run && G.lvlPending);
 }
+// AUTO-MEJORA: con el check activo, al abrirse la pantalla de mejoras se elige una carta al azar (tras 300 ms, para verla)
+function dbgAutoPick(){
+  const cb=document.getElementById('dbg-auto');
+  if(!cb||!cb.checked||!G||!G.run||!G.lvlPending) return;
+  setTimeout(()=>{
+    if(!cb.checked||!G.run||!G.lvlPending) return;
+    const btns=document.querySelectorAll('#upgrow .ubtn');
+    if(btns.length) btns[Math.floor(Math.random()*btns.length)].click();
+  },300);
+}
 // ============ FIN DEBUG PANEL ============
 
 // ─── SPRITE DE MONEDA (tira de 9 cuadros de 32x32: giro de la moneda) ───────
@@ -888,8 +904,9 @@ function startGame(){
   document.getElementById('bone-panel').style.display='none';
   dbgSyncRerollBtn();
   paused=false; initG();
+  if(CHARS[selChar].necro) prewarmThrallSheets();
   if(raf) cancelAnimationFrame(raf);
-  lastT=0; loop();
+  lastT=performance.now(); loop(lastT); // primer dt = 0 (antes el primer frame simulaba 50 ms de golpe)
 }
 function restartGame(){document.getElementById('gover').style.display='none'; startGame();}
 
@@ -1025,7 +1042,7 @@ function doShoot(){
   const alive=G.enemies.filter(e=>e.alive);
   if(G.bossAlive && G.boss && G.boss.alive) alive.push(G.boss);
   if(!alive.length) return;
-  alive.sort((a,b)=>hyp(a.x-p.x,a.y-p.y)-hyp(b.x-p.x,b.y-p.y));
+  alive.sort(_byDist2(p.x,p.y));
   // Solo disparar si hay al menos un enemigo realmente dentro de rango
   const inRange=alive.filter(e=>hyp(e.x-p.x,e.y-p.y)<=range+e.sz);
   if(!inRange.length) return;
@@ -1051,7 +1068,7 @@ function mageCandidates(x,y,fam,own){
   const ok=e=>e.alive&&!fam.hit.has(e)&&(!fam.claim.has(e)||e===own)&&hyp(e.x-x,e.y-y)<=MAGE_SPLIT_RADIUS;
   const c=G.enemies.filter(ok);
   const b=G.boss; if(G.bossAlive&&b&&ok(b)) c.push(b);
-  return c.sort((a,b2)=>hyp(a.x-x,a.y-y)-hyp(b2.x-x,b2.y-y));
+  return c.sort(_byDist2(x,y));
 }
 // Elige `count` objetivos entre los candidatos (ordenados de cerca a lejos): prefiere los que están a >= MAGE_SPLIT_MIN_DIST del impacto
 // y en direcciones distintas (>= MAGE_SPLIT_MIN_ANGLE entre sí); si no hay suficientes así, completa con los más cercanos.
@@ -1100,7 +1117,7 @@ function doArcherShoot(){
   const alive=G.enemies.filter(e=>e.alive);
   if(G.bossAlive && G.boss && G.boss.alive) alive.push(G.boss);
   if(!alive.length) return;
-  alive.sort((a,b)=>hyp(a.x-p.x,a.y-p.y)-hyp(b.x-p.x,b.y-p.y));
+  alive.sort(_byDist2(p.x,p.y));
   const target=alive.find(e=>hyp(e.x-p.x,e.y-p.y)<=range+e.sz);
   if(!target) return;
   let{dmg,isCrit}=calcDmg(p.atk+p.up.atk);
@@ -1534,7 +1551,7 @@ function findYokoChargeTarget(p,maxDist){
   const alive=G.enemies.filter(e=>e.alive);
   if(G.bossAlive && G.boss && G.boss.alive) alive.push(G.boss);
   if(!alive.length) return null;
-  alive.sort((a,b)=>hyp(a.x-p.x,a.y-p.y)-hyp(b.x-p.x,b.y-p.y));
+  alive.sort(_byDist2(p.x,p.y));
   const t=alive[0];
   if(hyp(t.x-p.x,t.y-p.y)>maxDist+t.sz) return null; // el más cercano sigue fuera del alcance del dash
   return t;
@@ -1872,7 +1889,7 @@ function doNecroAttack(){
   }
 
   if(!alive.length) return;
-  alive.sort((a,b)=>hyp(a.x-p.x,a.y-p.y)-hyp(b.x-p.x,b.y-p.y));
+  alive.sort(_byDist2(p.x,p.y));
   const nearest=alive[0];
   // Solo atacar si el enemigo más cercano está realmente dentro de rango
   if(hyp(nearest.x-p.x,nearest.y-p.y)>range+nearest.sz) return;
@@ -2206,6 +2223,12 @@ function getThrallSheet(name){
     cx2.globalCompositeOperation='source-atop'; cx2.fillStyle='rgba(40,230,150,.45)'; cx2.fillRect(0,0,c.width,c.height);
   }
   _thrallSheets[name]=c; return c;
+}
+// Precalcula las hojas teñidas en tiempo ocioso (una por callback) para que el primer esclavo de cada tipo no cause un tirón de ~140 ms
+function prewarmThrallSheets(){
+  const names=ETYPES.map(e=>e.name).concat('liche').filter(n=>SPRITES[n]&&!_thrallSheets[n]);
+  const idle=window.requestIdleCallback||(f=>setTimeout(f,200));
+  (function next(){ const n=names.shift(); if(!n) return; idle(()=>{ getThrallSheet(n); next(); }); })();
 }
 // Dibuja un esclavo con el sprite nuevo de su tipo (si lo tiene); devuelve false para usar el dibujo procedural
 function drawThrallSprite(th,sx,sy,wy,flash){
@@ -2573,6 +2596,7 @@ function triggerLvlUp(){
   renderUpgrades(pickUpgrades());
   updRerollBtn();
   dbgSyncRerollBtn();
+  dbgAutoPick(); // DEBUG: borrar junto con el panel de debug
 }
 
 function doReroll(){
@@ -2912,10 +2936,15 @@ function musicNote(freq, startTime, dur, vol, type='sine', detune=0, filterFreq=
     gain.connect(getMaster());
     osc.start(startTime);
     osc.stop(startTime + dur + 0.05);
-    MUSIC.nodes.push(osc);
+    _trackMusicNode(osc);
   }catch(e){}
 }
 
+// Registra el nodo y lo olvida cuando termina (antes la lista solo crecía porque el contexto nunca se cierra)
+function _trackMusicNode(n){
+  MUSIC.nodes.push(n);
+  n.onended=()=>{ const i=MUSIC.nodes.indexOf(n); if(i>=0) MUSIC.nodes.splice(i,1); try{n.disconnect();}catch(e){} };
+}
 function musicNoise(startTime, dur, vol, filterFreq=200, filterType='lowpass'){
   try{
     const ctx = getMCtx();
@@ -2933,7 +2962,7 @@ function musicNoise(startTime, dur, vol, filterFreq=200, filterType='lowpass'){
     gain.gain.exponentialRampToValueAtTime(0.0001, startTime + dur);
     src.connect(filt); filt.connect(gain); gain.connect(getMaster());
     src.start(startTime); src.stop(startTime + dur + 0.05);
-    MUSIC.nodes.push(src);
+    _trackMusicNode(src);
   }catch(e){}
 }
 
@@ -3067,7 +3096,8 @@ function scheduleBar(){
 }
 
 function startMusic(theme){
-  if(MUSIC.currentTheme === theme) return;
+  if(MUSIC.currentTheme === theme && !MUSIC._stopping) return; // si está apagándose, hay que reiniciarla
+  clearTimeout(MUSIC._stopTimer); // cancela el currentTheme=null pendiente de stopMusic
   MUSIC._stopping = false;
   const ctx = getMCtx();
   if(ctx.state === 'suspended') ctx.resume();
@@ -3115,7 +3145,8 @@ function stopMusic(fade=1.5){
   const now = ctx.currentTime;
   MUSIC.masterGain.gain.setValueAtTime(MUSIC.masterGain.gain.value, now);
   MUSIC.masterGain.gain.linearRampToValueAtTime(0, now + fade);
-  setTimeout(()=>{ MUSIC.currentTheme = null; }, fade * 1000 + 100);
+  clearTimeout(MUSIC._stopTimer);
+  MUSIC._stopTimer = setTimeout(()=>{ MUSIC.currentTheme = null; }, fade * 1000 + 100);
 }
 
 
@@ -3358,11 +3389,13 @@ function drawSpriteFrame(sheet, cfg, animName, frame, sx, sy, facingLeft, dmgFla
 }
 
 // ─── GAME LOOP ────────────────────────────────────────────────────────────────
+// Escena estática (menú, pausa, mejora, muerte): el canvas queda detrás de un scrim y no cambia,
+// así que se redibuja una sola vez (al entrar en el estado o al redimensionar) en vez de en cada frame
 function loop(ts=0){
   raf=requestAnimationFrame(loop);
   const dt=Math.min((ts-lastT)/1000,.05); lastT=ts;
-  if(!G.run||paused||G.lvlPending){draw();return;}
-  update(dt); draw();
+  if(!G.run||paused||G.lvlPending){ if(_redraw){draw();_redraw=false;} return; }
+  update(dt); draw(); _redraw=true;
 }
 function update(dt){
   const p=G.p; G.time+=dt; p.animT+=dt;
@@ -3387,7 +3420,8 @@ function update(dt){
     p.x+=mx*(p.spd+p.up.spd+furyBoost)*dt; p.y+=my*(p.spd+p.up.spd+furyBoost)*dt;
   }
   p.y=Math.max(-RH*TILE*.38,Math.min(RH*TILE*.38,p.y));
-  G.cam.x+=(p.x-G.cam.x)*.13; G.cam.y+=(p.y-G.cam.y)*.13;
+  const camK=1-Math.pow(.87,dt*60); // suavizado de cámara por tiempo (igual al .13 por frame a 60 Hz)
+  G.cam.x+=(p.x-G.cam.x)*camK; G.cam.y+=(p.y-G.cam.y)*camK;
   // Screen shake decay
   if(G.shake>0){
     G.shake=Math.max(0,G.shake-dt*18);
@@ -3604,13 +3638,13 @@ function update(dt){
   for(let i=G.parts.length-1;i>=0;i--){
     const pt=G.parts[i];
     pt.x+=pt.vx*dt; pt.y+=pt.vy*dt; pt.vy+=120*dt;
-    pt.vx*=.88; pt.life-=dt; pt.rot+=pt.rotV*dt;
+    pt.vx*=Math.pow(.88,dt*60); pt.life-=dt; pt.rot+=pt.rotV*dt;
     if(pt.life<=0)G.parts.splice(i,1);
   }
   for(let i=G.bloodSplats.length-1;i>=0;i--){
     const b=G.bloodSplats[i];
     if(b.moving!==false){
-      b.x+=b.vx*dt; b.y+=b.vy*dt; b.vy+=200*dt; b.vx*=.82;
+      b.x+=b.vx*dt; b.y+=b.vy*dt; b.vy+=200*dt; b.vx*=Math.pow(.82,dt*60);
       if(Math.abs(b.vy)<8&&Math.abs(b.vx)<8){ b.moving=false; b.life=rf(1.2,2.5); b.ml=b.life; } // se asienta
     }
     b.life-=dt;
@@ -3629,7 +3663,7 @@ function update(dt){
   }
   for(let i=G.dmgNums.length-1;i>=0;i--){
     const d=G.dmgNums[i];
-    d.x+=d.vx*dt; d.y+=d.vy*dt; d.vy*=.9; d.vx*=.9; d.life-=dt;
+    d.x+=d.vx*dt; d.y+=d.vy*dt; {const dk=Math.pow(.9,dt*60); d.vy*=dk; d.vx*=dk;} d.life-=dt;
     if(d.life<=0)G.dmgNums.splice(i,1);
   }
 
@@ -4303,13 +4337,43 @@ const WALL_TOP_Y  = -RH/2 * TILE;          // world Y of top wall face
 const WALL_BOT_Y  =  RH/2 * TILE;          // world Y of bottom wall face
 const WALL_H_PX   = 80;                    // visual wall thickness in pixels
 
-function drawTiles(W,H,cam){
-  const sTX=Math.floor((cam.x-W/2)/TILE)-1, eTX=Math.ceil((cam.x+W/2)/TILE)+1;
-  const sTY=Math.floor((cam.y-H/2)/TILE)-1, eTY=Math.ceil((cam.y+H/2)/TILE)+1;
-  for(let ty=sTY;ty<=eTY;ty++){
-    for(let tx=sTX;tx<=eTX;tx++){
+// ─── CACHÉ DEL FONDO ──────────────────────────────────────────────────────────
+// El piso y las estanterías son estáticos (solo dependen de la posición en el mundo), así que se
+// pre-renderizan en tramos de BG_CW px y cada frame solo se copian con drawImage. Lo animado (velas,
+// antorchas, niebla) sigue dibujándose cada frame. El fondo se posiciona con la cámara redondeada a
+// píxel entero (evita el desenfoque de copiar un canvas en posiciones fraccionarias).
+const BG_CW=960;                 // ancho de cada tramo: múltiplo de TILE (32), plankW (48) y shelfSpacing (96)
+const BG_FLOOR_Y0=-RH/2*TILE;    // y de mundo donde empieza el piso visible (entre las dos estanterías)
+const BG_FLOOR_H=RH*TILE;
+const BG_DEPTH=110;              // grosor de cada banda de estanterías
+const BG_PAD_IN=40, BG_PAD_OUT=8;// margen del tramo de banda hacia el pasillo / hacia afuera (objetos que sobresalen)
+const BG_BAND_H=BG_PAD_IN+BG_DEPTH+BG_PAD_OUT;
+const BOOK_PAL=[
+  '#5a2e0a','#3d1e08','#6b3810','#4a2412',
+  '#2a3d1a','#1e2e12','#354a20','#263514',
+  '#5e1a10','#4a1208','#6e2218','#3e0e08',
+  '#2a2010','#1e1808','#322818','#281a0a',
+  '#3e2e08','#4a3a10','#2e2208','#362a0e',
+];
+const _bgCache=new Map();
+// Devuelve el tramo cacheado; si no existe, lo dibuja redirigiendo el ctx global a un canvas nuevo
+function _bgChunk(key,k,w,h,build){
+  let e=_bgCache.get(key);
+  if(!e){
+    const c=document.createElement('canvas'); c.width=w; c.height=h;
+    const main=ctx; ctx=c.getContext('2d');
+    try{ build(); } finally { ctx=main; }
+    e={c,k}; _bgCache.set(key,e);
+  }
+  return e.c;
+}
+// Descarta los tramos lejanos a la cámara (deja uno de margen a cada lado)
+function _bgEvict(k0,k1){
+  for(const [key,e] of _bgCache) if(e.k<k0-1||e.k>k1+1) _bgCache.delete(key);
+}
+
+function _drawTileAt(tx,ty,sx,sy){
       const t=getTile(tx,ty);
-      const sx=tx*TILE-cam.x+W/2, sy=ty*TILE-cam.y+H/2;
       ctx.fillStyle=TPAL[t]; ctx.fillRect(sx,sy,TILE+1,TILE+1);
       if(t===0){
         const seed=(tx*7+ty*13)&3;
@@ -4384,10 +4448,22 @@ function drawTiles(W,H,cam){
           ctx.fillStyle='rgba(0,0,0,.3)'; ctx.fillRect(sx+1,sy+2+i*7,4,1);
         }
       }
-    }
+}
+
+function drawTiles(W,H,cam){
+  const ox=Math.round(W/2-cam.x), oy=Math.round(H/2-cam.y);
+  const k0=Math.floor(-ox/BG_CW), k1=Math.floor((W-1-ox)/BG_CW);
+  const tpc=BG_CW/TILE, ty0=BG_FLOOR_Y0/TILE;
+  for(let k=k0;k<=k1;k++){
+    const c=_bgChunk('f'+k,k,BG_CW,BG_FLOOR_H,()=>{
+      ctx.lineCap='round'; // el original lo dejaba en 'round' (la escalera de la biblioteca no restauraba el estado)
+      for(let ty=ty0;ty<ty0+RH;ty++) for(let tx=k*tpc;tx<(k+1)*tpc;tx++) _drawTileAt(tx,ty,(tx-k*tpc)*TILE,(ty-ty0)*TILE);
+    });
+    ctx.drawImage(c,ox+k*BG_CW,oy+BG_FLOOR_Y0);
   }
   drawAmbientFog(W,H,cam);
   drawLibraryWalls(W,H,cam);
+  _bgEvict(k0,k1);
 }
 
 // ─── NIEBLA AMBIENTAL ─────────────────────────────────────────────────────────
@@ -4412,17 +4488,13 @@ function drawAmbientFog(W,H,cam){
 }
 
 // ─── BIBLIOTECA GÓTICA ──────────────────────────────────────────────────────────
-function drawLibraryWalls(W,H,cam){
-  const t=G.time||0;
-
-  function drawShelfBand(wallWorldY, isTop){
-    const innerSY = wallWorldY - cam.y + H/2;
-    const DEPTH = 110;
-    const outerSY = isTop ? innerSY - DEPTH : innerSY + DEPTH;
-    const topSY   = isTop ? outerSY : innerSY;
-    const botSY   = isTop ? innerSY : outerSY;
-    if(botSY<0||topSY>H) return;
-
+// Banda de estanterías, capa A (estática): pared, tablones, montantes, baldas y libros.
+// Se dibuja en un tramo de W×H con la cámara en camX; innerSY es la y local del borde interior.
+function _bandDrawA(isTop,W,H,camX,innerSY){
+  const DEPTH=BG_DEPTH;
+  const outerSY = isTop ? innerSY - DEPTH : innerSY + DEPTH;
+  const topSY   = isTop ? outerSY : innerSY;
+  const botSY   = isTop ? innerSY : outerSY;
     // ── 1. Pared trasera de madera oscura ────────────────────────────────────
     const wallGrad=ctx.createLinearGradient(0,topSY,0,botSY);
     if(isTop){
@@ -4435,9 +4507,9 @@ function drawLibraryWalls(W,H,cam){
     // ── 2. Tablones de roble oscuro ──────────────────────────────────────────
     const plankW=48;
     const plankShades=['#1c1208','#1a100a','#1e1409','#180e07','#201508','#1b1108'];
-    const sPK=Math.floor((cam.x-W/2)/plankW)-1, ePK=Math.ceil((cam.x+W/2)/plankW)+1;
+    const sPK=Math.floor((camX-W/2)/plankW)-1, ePK=Math.ceil((camX+W/2)/plankW)+1;
     for(let wp=sPK;wp<=ePK;wp++){
-      const px=wp*plankW-cam.x+W/2;
+      const px=wp*plankW-camX+W/2;
       const ps=(((wp*17)%6)+6)%6;
       ctx.fillStyle=plankShades[ps]; ctx.fillRect(px,topSY,plankW-1,botSY-topSY);
       ctx.fillStyle='rgba(255,200,120,.022)';
@@ -4445,24 +4517,14 @@ function drawLibraryWalls(W,H,cam){
       ctx.fillRect(px+plankW*.65,topSY,1,botSY-topSY);
     }
 
-    // ── 3. ESTANTERÍAS CON LIBROS ────────────────────────────────────────────
-    const shelfSpacing=96;
-    const bookPalette=[
-      '#5a2e0a','#3d1e08','#6b3810','#4a2412',
-      '#2a3d1a','#1e2e12','#354a20','#263514',
-      '#5e1a10','#4a1208','#6e2218','#3e0e08',
-      '#2a2010','#1e1808','#322818','#281a0a',
-      '#3e2e08','#4a3a10','#2e2208','#362a0e',
-    ];
-
-    const sSH=Math.floor((cam.x-W/2)/shelfSpacing)-1, eSH=Math.ceil((cam.x+W/2)/shelfSpacing)+1;
-    for(let wcol=sSH;wcol<=eSH;wcol++){
-      const sx=wcol*shelfSpacing-cam.x+W/2;
-      // wcol es el índice de columna anclado al MUNDO (igual que tx/ty en drawTiles):
-      // usar SIEMPRE wcol (nunca una variable de loop screen-relative) para
-      // cualquier patrón/decisión de decoración, así no "saltan" al caminar.
-      const cseed=(((wcol*13)%7)+7)%7;
-
+  const shelfSpacing=96, bookPalette=BOOK_PAL;
+  const sSH=Math.floor((camX-W/2)/shelfSpacing)-1, eSH=Math.ceil((camX+W/2)/shelfSpacing)+1;
+  for(let wcol=sSH;wcol<=eSH;wcol++){
+    const sx=wcol*shelfSpacing-camX+W/2;
+    // wcol es el índice de columna anclado al MUNDO (igual que tx/ty en drawTiles):
+    // usar SIEMPRE wcol (nunca una variable de loop screen-relative) para
+    // cualquier patrón/decisión de decoración, así no "saltan" al caminar.
+    const cseed=(((wcol*13)%7)+7)%7;
       // Montante lateral
       ctx.fillStyle='#2e1e08'; ctx.fillRect(sx,topSY,5,botSY-topSY);
       ctx.fillStyle='rgba(255,180,80,.06)'; ctx.fillRect(sx+1,topSY,2,botSY-topSY);
@@ -4499,39 +4561,25 @@ function drawLibraryWalls(W,H,cam){
         }
       }
 
-      // ── 4. DECORACIONES ──────────────────────────────────────────────────────
-      const objSeed=(((wcol*19+77)%100)+100)%100;
-      const objY=isTop?innerSY-28:innerSY+6;
+  }
+}
 
-      // Candelabro de pared (cada 2 estanterías)
-      if(wcol%2===0){
-        const cx2=sx+shelfSpacing/2, cy2=objY;
-        const fl=0.65+Math.sin(t*8.5+wcol*2.1)*0.2+Math.sin(t*13+wcol*1.7)*0.15;
-        const r2=(28+fl*8)*1.0;
-        const tg=ctx.createRadialGradient(cx2,cy2,0,cx2,cy2,r2);
-        tg.addColorStop(0,`rgba(255,200,80,${.36*fl})`);
-        tg.addColorStop(.4,`rgba(255,140,30,${.15*fl})`);
-        tg.addColorStop(.8,`rgba(255,80,10,${.05*fl})`);
-        tg.addColorStop(1,'rgba(255,60,0,0)');
-        ctx.fillStyle=tg; ctx.fillRect(cx2-r2,cy2-r2,r2*2,r2*2);
-        // Soporte
-        ctx.fillStyle='#2a2018'; ctx.fillRect(cx2-3,cy2,6,8);
-        ctx.fillRect(cx2-8,cy2+2,16,3);
-        ctx.fillStyle='#3a3025'; ctx.fillRect(cx2-2,cy2+1,4,6);
-        // Vela
-        ctx.fillStyle='#e8e0d0'; ctx.fillRect(cx2-2,cy2-8,4,8);
-        ctx.fillStyle='rgba(220,210,190,.6)'; ctx.beginPath(); ctx.ellipse(cx2,cy2,3,1.5,0,0,PI*2); ctx.fill();
-        // Llama
-        ctx.save(); ctx.shadowColor='#ff9900'; ctx.shadowBlur=10;
-        const fh=6+fl*4;
-        ctx.fillStyle=`rgba(255,200,50,${.88*fl})`;
-        ctx.beginPath(); ctx.ellipse(cx2+Math.sin(t*9+wcol)*.6,cy2-8-fh*.35,2,fh*.5,0,0,PI*2); ctx.fill();
-        ctx.fillStyle=`rgba(255,255,140,${.5*fl})`;
-        ctx.beginPath(); ctx.ellipse(cx2,cy2-9-fh*.38,0.8,fh*.22,0,0,PI*2); ctx.fill();
-        if(Math.sin(t*18+wcol*3.7)>0.92){ ctx.fillStyle='rgba(255,220,80,.8)'; ctx.beginPath(); ctx.arc(cx2+(Math.random()-.5)*3,cy2-8-fh-.5*Math.random(),.7,0,PI*2); ctx.fill(); }
-        ctx.restore();
-      }
-
+// Banda de estanterías, capa B (estática): globo, libros apilados, pergamino, tintero, telarañas, escalera
+function _bandDrawB(isTop,W,H,camX,innerSY){
+  ctx.lineCap='round'; // el original lo dejaba en 'round' (la escalera no restauraba el estado)
+  const DEPTH=BG_DEPTH;
+  const outerSY = isTop ? innerSY - DEPTH : innerSY + DEPTH;
+  const topSY   = isTop ? outerSY : innerSY;
+  const botSY   = isTop ? innerSY : outerSY;
+  const shelfSpacing=96, bookPalette=BOOK_PAL;
+  const sSH=Math.floor((camX-W/2)/shelfSpacing)-1, eSH=Math.ceil((camX+W/2)/shelfSpacing)+1;
+  for(let wcol=sSH;wcol<=eSH;wcol++){
+    const sx=wcol*shelfSpacing-camX+W/2;
+    // wcol es el índice de columna anclado al MUNDO (igual que tx/ty en drawTiles):
+    // usar SIEMPRE wcol (nunca una variable de loop screen-relative) para
+    // cualquier patrón/decisión de decoración, así no "saltan" al caminar.
+    const cseed=(((wcol*13)%7)+7)%7;
+    const objSeed=(((wcol*19+77)%100)+100)%100;
       // Globo terráqueo (raro)
       if(objSeed<12){
         const gx=sx+shelfSpacing*.5, gy=isTop?innerSY-20:innerSY+4;
@@ -4591,7 +4639,78 @@ function drawLibraryWalls(W,H,cam){
           ctx.beginPath(); ctx.moveTo(lx-4-4*sp,ly1*(1-sp)+ly2*sp); ctx.lineTo(lx+4-2*sp,ly1*(1-sp)+ly2*sp); ctx.stroke();
         }
       }
+  }
+}
+
+// Candelabros de pared (animados): se dibujan cada frame entre las capas A y B
+function _bandCandles(isTop,W,ox,innerSY,t){
+  const shelfSpacing=96;
+  const sSH=Math.floor(-ox/shelfSpacing)-1, eSH=Math.ceil((W-ox)/shelfSpacing)+1;
+  for(let wcol=sSH;wcol<=eSH;wcol++){
+    const sx=wcol*shelfSpacing+ox;
+    const objY=isTop?innerSY-28:innerSY+6;
+      // Candelabro de pared (cada 2 estanterías)
+      if(wcol%2===0){
+        const cx2=sx+shelfSpacing/2, cy2=objY;
+        const fl=0.65+Math.sin(t*8.5+wcol*2.1)*0.2+Math.sin(t*13+wcol*1.7)*0.15;
+        const r2=(28+fl*8)*1.0;
+        const tg=ctx.createRadialGradient(cx2,cy2,0,cx2,cy2,r2);
+        tg.addColorStop(0,`rgba(255,200,80,${.36*fl})`);
+        tg.addColorStop(.4,`rgba(255,140,30,${.15*fl})`);
+        tg.addColorStop(.8,`rgba(255,80,10,${.05*fl})`);
+        tg.addColorStop(1,'rgba(255,60,0,0)');
+        ctx.fillStyle=tg; ctx.fillRect(cx2-r2,cy2-r2,r2*2,r2*2);
+        // Soporte
+        ctx.fillStyle='#2a2018'; ctx.fillRect(cx2-3,cy2,6,8);
+        ctx.fillRect(cx2-8,cy2+2,16,3);
+        ctx.fillStyle='#3a3025'; ctx.fillRect(cx2-2,cy2+1,4,6);
+        // Vela
+        ctx.fillStyle='#e8e0d0'; ctx.fillRect(cx2-2,cy2-8,4,8);
+        ctx.fillStyle='rgba(220,210,190,.6)'; ctx.beginPath(); ctx.ellipse(cx2,cy2,3,1.5,0,0,PI*2); ctx.fill();
+        // Llama
+        ctx.save(); ctx.shadowColor='#ff9900'; ctx.shadowBlur=10;
+        const fh=6+fl*4;
+        ctx.fillStyle=`rgba(255,200,50,${.88*fl})`;
+        ctx.beginPath(); ctx.ellipse(cx2+Math.sin(t*9+wcol)*.6,cy2-8-fh*.35,2,fh*.5,0,0,PI*2); ctx.fill();
+        ctx.fillStyle=`rgba(255,255,140,${.5*fl})`;
+        ctx.beginPath(); ctx.ellipse(cx2,cy2-9-fh*.38,0.8,fh*.22,0,0,PI*2); ctx.fill();
+        if(Math.sin(t*18+wcol*3.7)>0.92){ ctx.fillStyle='rgba(255,220,80,.8)'; ctx.beginPath(); ctx.arc(cx2+(Math.random()-.5)*3,cy2-8-fh-.5*Math.random(),.7,0,PI*2); ctx.fill(); }
+        ctx.restore();
+      }
+
+  }
+}
+
+function drawLibraryWalls(W,H,cam){
+  const t=G.time||0;
+  const ox=Math.round(W/2-cam.x), oy=Math.round(H/2-cam.y);
+  const k0=Math.floor(-ox/BG_CW), k1=Math.floor((W-1-ox)/BG_CW);
+
+  function drawShelfBand(wallWorldY, isTop){
+    const innerSY = wallWorldY + oy;
+  const DEPTH=BG_DEPTH;
+  const outerSY = isTop ? innerSY - DEPTH : innerSY + DEPTH;
+  const topSY   = isTop ? outerSY : innerSY;
+  const botSY   = isTop ? innerSY : outerSY;
+    if(botSY<0||topSY>H) return;
+    const loc = isTop ? BG_PAD_OUT+BG_DEPTH : BG_PAD_IN; // y local del borde interior dentro del tramo
+    const tag = isTop ? 't' : 'b';
+
+    // capa A (estática, cacheada)
+    for(let k=k0;k<=k1;k++){
+      const c=_bgChunk(tag+'A'+k,k,BG_CW,BG_BAND_H,()=>_bandDrawA(isTop,BG_CW,BG_BAND_H,k*BG_CW+BG_CW/2,loc));
+      ctx.drawImage(c,ox+k*BG_CW,innerSY-loc);
     }
+    // candelabros (animados)
+    _bandCandles(isTop,W,ox,innerSY,t);
+    // capa B (estática, cacheada)
+    for(let k=k0;k<=k1;k++){
+      const c=_bgChunk(tag+'B'+k,k,BG_CW,BG_BAND_H,()=>_bandDrawB(isTop,BG_CW,BG_BAND_H,k*BG_CW+BG_CW/2,loc));
+      ctx.drawImage(c,ox+k*BG_CW,innerSY-loc);
+    }
+    // El original dejaba ctx.lineCap='round' al dibujar una escalera; se conserva para el resto del frame
+    const sSH=Math.floor(-ox/96)-1, eSH=Math.ceil((W-ox)/96)+1;
+    for(let wcol=sSH;wcol<=eSH;wcol++) if(wcol%8===5){ ctx.lineCap='round'; break; }
 
     // ── 5. Zócalo interior ───────────────────────────────────────────────────
     const baseH=8, baseY=isTop?innerSY-baseH:innerSY;
@@ -4623,7 +4742,7 @@ function drawLibraryWalls(W,H,cam){
 function drawTorches(W,H,cam){
   const t=G.time||0;
   for(const tr of TORCHES){
-    const sx=tr.ox-cam.x+W/2, sy=tr.oy-cam.y+H/2;
+    const sx=tr.ox+Math.round(W/2-cam.x), sy=tr.oy+Math.round(H/2-cam.y); // misma cámara redondeada que el fondo cacheado
     if(sx<-100||sx>W+100) continue;
     const fl=0.6+Math.sin(t*8.5+tr.ph)*0.22+Math.sin(t*13+tr.ph*1.4)*0.14;
     const r=(34+fl*10)*tr.sz;
@@ -5782,41 +5901,44 @@ function updSkillBar(){
     if(act!==sl.active){ sl.active=act; sl.el.classList.toggle('active',act); }
   }
 }
+// Escrituras al DOM solo si el valor cambió (textContent reemplaza los nodos aunque el valor sea igual)
+const _hudEls={};
+function _hudEl(id){ return _hudEls[id]||(_hudEls[id]=document.getElementById(id)); }
+function _hudTxt(id,v){ const e=_hudEl(id); v=''+v; if(e._t!==v){ e._t=v; e.textContent=v; } }
+function _hudSty(id,prop,v){ const e=_hudEl(id), k='_s_'+prop; if(e[k]!==v){ e[k]=v; e.style[prop]=v; } }
+const _pw=v=>v.toFixed(2)+'%';
 function updHUD(){
   if(!G.p)return; const p=G.p;
   updSkillBar();
-  document.getElementById('hpbar').style.width=Math.max(0,p.hp/p.mhp*100)+'%';
-  document.getElementById('hptxt').textContent=Math.ceil(p.hp)+'/'+p.mhp;
-  document.getElementById('xpbar').style.width=(p.xp/p.xpN*100)+'%';
-  document.getElementById('xptxt').textContent=p.xp+'/'+p.xpN;
-  document.getElementById('hlv').textContent=p.lv;
-  document.getElementById('skills').textContent=G.kills;
-  document.getElementById('sgold').textContent=G.gold|0;
+  _hudSty('hpbar','width',_pw(Math.max(0,p.hp/p.mhp*100)));
+  _hudTxt('hptxt',Math.ceil(p.hp)+'/'+p.mhp);
+  _hudSty('xpbar','width',_pw(p.xp/p.xpN*100));
+  _hudTxt('xptxt',p.xp+'/'+p.xpN);
+  _hudTxt('hlv',p.lv);
+  _hudTxt('skills',G.kills);
+  _hudTxt('sgold',G.gold|0);
   const m=Math.floor(G.time/60),s=Math.floor(G.time%60);
-  document.getElementById('stime').textContent=m+':'+String(s).padStart(2,'0');
-  document.getElementById('swave').textContent=G.wave;
+  _hudTxt('stime',m+':'+String(s).padStart(2,'0'));
+  _hudTxt('swave',G.wave);
   // Lilith, Hija del Odio — indicador de daño del próximo golpe
-  const lilithBar=document.getElementById('lilith-bar');
   if(G.lilithAlive && G.lilith){
-    lilithBar.style.display='block';
-    document.getElementById('lilith-dmg-val').textContent=Math.ceil(G.lilith.atk);
+    _hudSty('lilith-bar','display','block');
+    _hudTxt('lilith-dmg-val',Math.ceil(G.lilith.atk));
   } else {
-    lilithBar.style.display='none';
+    _hudSty('lilith-bar','display','none');
   }
   if(p.yoko){
-    const row=document.getElementById('bloodlust-row');
-    const fill=document.getElementById('bloodlust-bar-fill');
-    row.style.display='block';
+    _hudEl('bloodlust-row').style.display='block';
     if(p.bloodlustActive){
-      document.getElementById('bloodlust-txt').textContent=Math.ceil(p.bloodlustT)+'s';
-      fill.style.width=(p.bloodlustT/BLOODLUST_DURATION*100)+'%';
-      fill.style.background='linear-gradient(90deg,#8a0000,#ff2222)';
-      row.style.color='#ff2222';
+      _hudTxt('bloodlust-txt',Math.ceil(p.bloodlustT)+'s');
+      _hudSty('bloodlust-bar-fill','width',_pw(p.bloodlustT/BLOODLUST_DURATION*100));
+      _hudSty('bloodlust-bar-fill','background','linear-gradient(90deg,#8a0000,#ff2222)');
+      _hudSty('bloodlust-row','color','#ff2222');
     } else {
-      document.getElementById('bloodlust-txt').textContent=Math.ceil(p.bloodlustCD)+'s';
-      fill.style.width=((BLOODLUST_COOLDOWN-p.bloodlustCD)/BLOODLUST_COOLDOWN*100)+'%';
-      fill.style.background='linear-gradient(90deg,#555,#888)';
-      row.style.color='#994444';
+      _hudTxt('bloodlust-txt',Math.ceil(p.bloodlustCD)+'s');
+      _hudSty('bloodlust-bar-fill','width',_pw((BLOODLUST_COOLDOWN-p.bloodlustCD)/BLOODLUST_COOLDOWN*100));
+      _hudSty('bloodlust-bar-fill','background','linear-gradient(90deg,#555,#888)');
+      _hudSty('bloodlust-row','color','#994444');
     }
   }
   updateUpgradesPanel();
@@ -5839,7 +5961,8 @@ function updateBonePanel(){
   if(p.chargeDmgBonus>0){
     rows.push(`<div class="bone-row bone-fuerza">💪 FUERZA<span class="bone-val">próx. embestida +60%</span></div>`);
   }
-  panel.innerHTML=rows.join('');
+  const html=rows.join('');
+  if(html!==panel._lastHtml){ panel.innerHTML=html; panel._lastHtml=html; }
   panel.style.bottom=joystickActive?'200px':'14px'; // con joystick activo, se sube para no taparlo
   panel.style.display=rows.length?'flex':'none';
 }
@@ -5903,12 +6026,16 @@ function updateUpgradesPanel(){
     if(up.chargeLifesteal>0) add('🩸','VAMPIRO+','+'+up.chargeLifesteal,'rare');
   }
 
-  // El panel se reescribe con innerHTML: el delay negativo ligado al reloj mantiene continua la fase del brillo
-  const glowDelay='-'+(((performance.now()/1000)%1.6).toFixed(3))+'s';
+  // El panel solo se reescribe si cambió el HTML (sin delay en el string, para no forzar innerHTML cada frame);
+  // tras reescribirlo, el delay negativo ligado al reloj mantiene continua la fase del pulso
   const html=rows.map(r=>
-    `<div class="stat-upg-row stat-${r.tier}${r.maxed?' maxed':''}"${r.maxed?` style="animation-delay:${glowDelay}"`:''}><span class="stat-upg-icon">${r.icon}</span><span>${r.label}</span><span class="stat-upg-val">${r.val}</span></div>`
+    `<div class="stat-upg-row stat-${r.tier}${r.maxed?' maxed':''}"><span class="stat-upg-icon">${r.icon}</span><span>${r.label}</span><span class="stat-upg-val">${r.val}</span></div>`
   ).join('');
-  if(html!==panel._lastHtml){ panel.innerHTML=html; panel._lastHtml=html; }
+  if(html!==panel._lastHtml){
+    panel.innerHTML=html; panel._lastHtml=html;
+    const glowDelay='-'+(((performance.now()/1000)%1.6).toFixed(3))+'s';
+    panel.querySelectorAll('.maxed').forEach(el=>el.style.setProperty('--gd',glowDelay));
+  }
 }
 function endGame(){
   sndDeath(); stopMusic(2.0);
