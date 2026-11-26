@@ -412,6 +412,12 @@ function drawYoko(sx,sy,p){
 function drawPlayer(W,H,p){
   const sx=W/2, sy=H/2;
   if(p.invT>0&&Math.floor(p.invT*16)%2===0) return;
+  // Muerte animada (ver endGame): sin update() corriendo, el cuadro sale del reloj y se vuelve a pedir draw() hasta el último
+  if(p.deathT0!==undefined){
+    const [,count,fps]=SPRITE_CFG[p.id].anims.death, f=Math.floor((performance.now()-p.deathT0)/1000*fps);
+    p.sprFrame=Math.min(count-1,f);
+    if(f<count-1) _redraw=true;
+  }
 
   const bob=Math.sin(p.walkPhase)*.5; // walking bob
 
@@ -446,6 +452,15 @@ function drawPlayer(W,H,p){
   ctx.fillStyle='rgba(255,255,255,.15)'; ctx.fillRect(sx-15,barY+1,30*hr,1);
 }
 
+// Caída por código para hojas sin cuadros de muerte (Caballero ORIGINAL y Arquero): el cuadro de reposo rota hacia
+// delante sobre los pies y se apaga un poco. Usa p.sprFrame de la animación 'death' (5 cuadros: 0..4 = de pie..en el piso).
+function drawSpriteFall(sheet,cfg,sx,sy,p){
+  const t=Math.min(1,(p.sprFrame||0)/4), dir=p.facingLeft?-1:1;
+  ctx.save(); ctx.translate(sx,sy); ctx.rotate(dir*t*PI/2); ctx.globalAlpha=1-.25*t;
+  drawSpriteFrame(sheet, cfg, 'idle', 0, 0, 0, p.facingLeft||false, false);
+  ctx.restore();
+}
+
 function drawKnight(sx,sy,p){
   // Si el sprite sheet está cargado, usarlo
   if(SPRITES.knightNew || SPRITES.knight){
@@ -458,11 +473,7 @@ function drawKnight(sx,sy,p){
       if(KNIGHT_NAT && knightSheetsReady()){
         drawKnightSuave(sx,sy,p);
       } else if(anim==='death'){
-        // caída por código: el sprite de pie rota hacia delante sobre los pies y se apaga un poco
-        const t=Math.min(1,(p.sprFrame||0)/4), dir=p.facingLeft?-1:1;
-        ctx.save(); ctx.translate(sx,sy); ctx.rotate(dir*t*PI/2); ctx.globalAlpha=1-.25*t;
-        drawSpriteFrame(SPRITES.knightNew, SPRITE_CFG.knight, 'idle', 0, 0, 0, p.facingLeft||false, false);
-        ctx.restore();
+        drawSpriteFall(SPRITES.knightNew, SPRITE_CFG.knight, sx, sy, p);
       } else if(KNIGHT_NAT){
         drawKnightNat(sx,sy,p,anim);
       } else if(anim==='attack' && SPRITES.knightAtk){
@@ -513,7 +524,8 @@ function drawArcher(sx,sy,p){
   if(SPRITES.archer){
     if(p.invT>0 && Math.floor(p.invT*16)%2===0) return;
     drawGroundShadow(sx,sy+2,11,3.5,.25);
-    drawSpriteFrame(SPRITES.archer, SPRITE_CFG.archer, p.sprAnim||'idle', p.sprFrame||0, sx, sy, p.facingLeft||false, p.dmgF>0);
+    if(p.sprAnim==='death') drawSpriteFall(SPRITES.archer, SPRITE_CFG.archer, sx, sy, p); // la hoja no tiene cuadros de muerte
+    else drawSpriteFrame(SPRITES.archer, SPRITE_CFG.archer, p.sprAnim||'idle', p.sprFrame||0, sx, sy, p.facingLeft||false, p.dmgF>0);
     return;
   }
   const flash=p.dmgF>0, f=c=>flash?'#ffffff':c;

@@ -4,7 +4,7 @@
 // así que se redibuja una sola vez (al entrar en el estado o al redimensionar) en vez de en cada frame
 function loop(ts=0){
   raf=requestAnimationFrame(loop);
-  const dt=Math.min((ts-lastT)/1000,.05); lastT=ts;
+  const dt=Math.max(0,Math.min((ts-lastT)/1000,.05)); lastT=ts; // entre 0 y 50 ms: un timestamp anterior al último no hace retroceder el tiempo
   if(!G.run||paused||G.lvlPending){ if(_redraw){ _redraw=false; draw(); } return; } // draw() puede volver a pedir redibujo (animación de muerte)
   update(dt); draw(); _redraw=true;
 }

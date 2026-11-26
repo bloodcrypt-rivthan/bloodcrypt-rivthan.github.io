@@ -209,10 +209,18 @@ function endGame(){
   G.run=false;
   const nr=saveRun('dead');
   const _p0=G.p;
+  // update() ya no corre: la barra de vida queda en 0 (algunos golpes la dejaban negativa), y ni el parpadeo de
+  // invulnerabilidad ni el destello blanco del golpe quedan congelados (el héroe moría invisible o todo blanco)
+  if(_p0){ _p0.hp=Math.max(0,_p0.hp); _p0.invT=0; _p0.dmgF=0; }
   if(_p0&&_p0.melee&&KNIGHT_NAT&&knightSheetsReady()){ // muerte animada del Caballero SUAVE: la pantalla de fin aparece cuando termina
     _p0.sprAnim='death'; _p0.kDeathT0=performance.now(); _redraw=true;
     setTimeout(()=>{ if(!G.run&&G.p===_p0) document.getElementById('gover').style.display='flex'; },(knSecs('knS_death')+KN2_DEATH_EXTRA)*1000);
-  } else document.getElementById('gover').style.display='flex';
+  } else if(_p0&&SPRITES[_p0.id]&&SPRITE_CFG[_p0.id].anims.death){ // el resto, con su animación 'death': mismo esquema
+    // (drawPlayer avanza los cuadros con el reloj desde deathT0, porque update() ya no corre)
+    _p0.sprAnim='death'; _p0.sprFrame=0; _p0.sprFrameT=0; _p0.sprDead=true; _p0.deathT0=performance.now(); _redraw=true;
+    const [,count,fps]=SPRITE_CFG[_p0.id].anims.death;
+    setTimeout(()=>{ if(!G.run&&G.p===_p0) document.getElementById('gover').style.display='flex'; },(count/fps+KN2_DEATH_EXTRA)*1000);
+  } else document.getElementById('gover').style.display='flex'; // sin sprite cargado: fin inmediato, como antes
   document.getElementById('hud').style.display='none';
   document.getElementById('pausebtn').style.display='none';
   showVolBtn(false);

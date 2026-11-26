@@ -204,8 +204,8 @@ const SPRITE_CFG = {
     // Sheet de 12 frames (392x408, ojos como ancla horizontal y pies en la misma línea):
     //   0-1 idle (poses de reposo del disparo), 2-5 ataque (alcanzar flecha, tensar, tensar a fondo, SOLTAR), 6-11 caminata (original, 6 frames).
     // La flecha NO está dibujada saliendo: el proyectil lo genera doArcherShoot() justo en el último frame (soltar).
-    // death: sin animación propia todavía (usa la pose de reposo).
-    anims: { idle:[0,2,2.5], attack:[2,4,26], walk:[6,6,10], death:[0,1,4] },
+    // death: la hoja no tiene cuadros de muerte; 5 cuadros a 8 fps son solo el tiempo de la caída por código (drawSpriteFall).
+    anims: { idle:[0,2,2.5], attack:[2,4,26], walk:[6,6,10], death:[0,5,8] },
     srcX:0, srcY:0, srcW:392, srcH:408, drawH:62, stride:392
   },
   // (todos los enemigos comunes ya tienen sprite; el boss Rey Liche esclavizado sigue procedural)
