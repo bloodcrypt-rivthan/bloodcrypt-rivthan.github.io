@@ -3,12 +3,14 @@
 // (si se borra, dejar en el juego dbgSyncRerollBtn/dbgAutoPick como funciones vacías o quitar sus llamadas)
 
 // ¿Panel prendido? Prendido en tu máquina (localhost o abriendo el archivo con doble clic) y apagado en la versión
-// publicada. El parámetro ?debug manda siempre: ?debug (o ?debug=1) lo prende en cualquier lado, ?debug=0 lo apaga.
+// publicada. El parámetro ?debug manda siempre: ?debug (o ?debug=1) lo prende en cualquier lado; ?debug=0, =false,
+// =off o =no lo apagan. "Tu máquina" incluye [::] y 0.0.0.0, que son las direcciones que imprimen algunos
+// servidores locales (python -m http.server muestra http://[::]:8000/).
 // loc = {protocol, hostname, search} (window.location u otro objeto con esos campos, para poder probarla).
 function debugEnabled(loc){
   const q=new URLSearchParams(loc.search||'').get('debug');
-  if(q!==null) return q!=='0';
-  return loc.protocol==='file:' || ['localhost','127.0.0.1','[::1]',''].includes(loc.hostname);
+  if(q!==null) return !['0','false','off','no'].includes(q.toLowerCase());
+  return loc.protocol==='file:' || ['localhost','127.0.0.1','[::1]','[::]','0.0.0.0',''].includes(loc.hostname);
 }
 const DEBUG_ON=debugEnabled(location);
 document.body.classList.toggle('debug-on',DEBUG_ON); // sin esta clase el CSS oculta #debug-panel
