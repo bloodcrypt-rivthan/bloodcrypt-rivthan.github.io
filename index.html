@@ -3643,6 +3643,56 @@ function update(dt){
   updatePoison(dt);
   updateKnightSpriteAnim(dt,mx,my);
 
+  // Resto del frame, en orden fijo. Las que devuelven true terminaron la partida (endGame) y cortan el frame acá,
+  // igual que el return que había antes en medio de update().
+  updateProjectiles(dt);
+  if(updateEnemies(dt)) return;
+  if(updateEnemyProjectiles(dt)) return;
+  updateOrbs(dt);
+  updateEffects(dt);
+  updateSpawner(dt);
+  if(updateBoss(dt)) return;
+  if(updateLilith(dt)) return;
+  if(updateBossProjectiles(dt)) return;
+
+  // Red de seguridad: si por cualquier vía la vida llegó a 0 sin comprobarse, se termina la partida
+  if(G.run && G.p.hp<=0){ G.p.hp=0; endGame(); return; }
+  updHUD();
+}
+
+// Mecánicas de impacto de un proyectil del héroe sobre un objetivo t (enemigo o jefe), en este orden:
+// veneno (flechas), división (orbe del mago) y perforación. Devuelve true si el proyectil sigue (perforó)
+// y false si se consumió (queda pr.alive=false).
+// Ojo con el orden respecto de la muerte: un enemigo muere ANTES de llamar a esto (killE) y el jefe DESPUÉS
+// (killBoss, que además puede esclavizarlo). Es así desde antes; cambiarlo cambia la jugabilidad.
+function projAfterHit(pr,t){
+  if(pr.arrow) applyPoison(t);
+  if(pr.mage) mageSplit(pr,t);
+  if(pr.pierceLeft>0){ pr.pierceLeft--; pr.hit.add(t); pr.dmg*=pr.pierceDecay; return true; }
+  pr.alive=false;
+  return false;
+}
+
+// Choque de un proyectil del héroe con el jefe (ox,oy = posición anterior, para el barrido de las flechas).
+// Tiene sus propios efectos (flash, sangre lila, sonido de golpe al jefe) y mata al jefe después de las mecánicas.
+function projHitBoss(pr,ox,oy){
+  if(pr.alive && !(pr.arm>0) && (!pr.home||pr.home===G.boss) && G.bossAlive && G.boss && G.boss.alive && !(pr.hit && pr.hit.has(G.boss))){
+    const boss=G.boss;
+    const touchedB = pr.arrow ? segDist(boss.x,boss.y,ox,oy,pr.x,pr.y)<boss.sz+pr.sz : hyp(pr.x-boss.x,pr.y-boss.y)<boss.sz+pr.sz;
+    if(touchedB){
+      boss.hp-=pr.dmg; boss.fl=.10;
+      if(pr.isCrit){G.totalCrits++;spawnDmgNum(boss.x,boss.y-boss.sz*2,pr.dmg,true);sndCrit();}
+      else{sndBossHit();}
+      spawnBlood(boss.x,boss.y,pr.isCrit?16:10,'#c8b8ff');
+      spParts(boss.x,boss.y,pr.isCrit?'#ff8800':(pr.arrow?'#d9c27a':'#aa66ff'),pr.isCrit?12:7);
+      projAfterHit(pr,boss);
+      if(boss.hp<=0) killBoss();
+    }
+  }
+}
+
+// Proyectiles del héroe: movimiento, búsqueda del orbe dividido del mago y choque con enemigos y jefe.
+function updateProjectiles(dt){
   // Projectiles
   for(let i=G.projs.length-1;i>=0;i--){
     const pr=G.projs[i];
@@ -3675,32 +3725,18 @@ function update(dt){
         spawnBlood(e.x,e.y,pr.isCrit?14:8,pr.isCrit?'#ff6600':'#aa1111');
         spParts(e.x,e.y,pr.isCrit?'#ff8800':(pr.arrow?'#d9c27a':'#cc44ff'),pr.isCrit?10:6);
         if(e.hp<=0) killE(e);
-        if(pr.arrow) applyPoison(e);
-        if(pr.mage) mageSplit(pr,e);
-        if(pr.pierceLeft>0){ pr.pierceLeft--; pr.hit.add(e); pr.dmg*=pr.pierceDecay; }   // la flecha sigue de largo
-        else { pr.alive=false; break; }
+        if(!projAfterHit(pr,e)) break;   // se consumió; si perforó, la flecha sigue de largo
       }
     }
-    // Proyectil vs Boss
-    if(pr.alive && !(pr.arm>0) && (!pr.home||pr.home===G.boss) && G.bossAlive && G.boss && G.boss.alive && !(pr.hit && pr.hit.has(G.boss))){
-      const boss=G.boss;
-      const touchedB = pr.arrow ? segDist(boss.x,boss.y,ox,oy,pr.x,pr.y)<boss.sz+pr.sz : hyp(pr.x-boss.x,pr.y-boss.y)<boss.sz+pr.sz;
-      if(touchedB){
-        boss.hp-=pr.dmg; boss.fl=.10;
-        if(pr.isCrit){G.totalCrits++;spawnDmgNum(boss.x,boss.y-boss.sz*2,pr.dmg,true);sndCrit();}
-        else{sndBossHit();}
-        spawnBlood(boss.x,boss.y,pr.isCrit?16:10,'#c8b8ff');
-        spParts(boss.x,boss.y,pr.isCrit?'#ff8800':(pr.arrow?'#d9c27a':'#aa66ff'),pr.isCrit?12:7);
-        if(pr.arrow) applyPoison(boss);
-        if(pr.mage) mageSplit(pr,boss);
-        if(pr.pierceLeft>0){ pr.pierceLeft--; pr.hit.add(boss); pr.dmg*=pr.pierceDecay; }
-        else pr.alive=false;
-        if(boss.hp<=0) killBoss();
-      }
-    }
+    projHitBoss(pr,ox,oy);
   }
   G.projs=G.projs.filter(p=>p.alive);
+}
 
+// Enemigos: movimiento, disparos del brujo, dash de la gárgola, daño por contacto al héroe y a los esqueletos.
+// Devuelve true si el contacto mató al héroe (la partida terminó y el frame se corta).
+function updateEnemies(dt){
+  const p=G.p;
   // Enemies
   for(let i=G.enemies.length-1;i>=0;i--){
     const e=G.enemies[i];
@@ -3759,7 +3795,7 @@ function update(dt){
       // multitud: los demás enemigos que también tocan al héroe suman una fracción de su golpe (con tope)
       for(const o of G.enemies){ if(o===e||!o.alive) continue; if(hyp(o.x-p.x,o.y-p.y)<o.sz+14) extra+=o.atk*CONTACT_HIT_MULT*CONTACT_CROWD_MULT; }
       hit+=Math.min(extra,hit*CONTACT_CROWD_CAP);
-      p.hp-=hit*dmgMult;p.dmgF=.15;p.invT=.28;sndDamage();addShake(4);if(p.hp<=0){endGame();return;}
+      p.hp-=hit*dmgMult;p.dmgF=.15;p.invT=.28;sndDamage();addShake(4);if(p.hp<=0){endGame();return true;}
     }
 
     // Enemigo ataca al esqueleto más cercano si está en rango (en vez del jugador)
@@ -3782,7 +3818,11 @@ function update(dt){
       }
     }
   }
+}
 
+// Proyectiles enemigos (brujo). Devuelve true si mataron al héroe.
+function updateEnemyProjectiles(dt){
+  const p=G.p;
   // Proyectiles enemigos (warlock)
   if(!G.eProjs) G.eProjs=[];
   for(let i=G.eProjs.length-1;i>=0;i--){
@@ -3797,10 +3837,14 @@ function update(dt){
       const dmgMult=1-Math.min(ARMOR_MAX,p.up.armor||0);
       p.hp-=pr.dmg*dmgMult; p.dmgF=.15; p.invT=.35; sndDamage(); addShake(3);
       G.eProjs.splice(i,1);
-      if(p.hp<=0){endGame();return;}
+      if(p.hp<=0){endGame();return true;}
     }
   }
+}
 
+// Orbes de XP y oro: deslizamiento, recogida y subida de nivel.
+function updateOrbs(dt){
+  const p=G.p;
   // Orbes de XP: ya NO se dirigen hacia el héroe; quedan donde cayeron y hay que ir a recogerlos.
   // Si cayeron fuera de la zona alcanzable (más allá de los muros, donde el héroe no puede entrar),
   // se deslizan hacia el borde alcanzable más cercano.
@@ -3828,7 +3872,10 @@ function update(dt){
       while(p.xp>=p.xpN)triggerLvlUp(); }
     }
   }
+}
 
+// Efectos visuales con vida propia: partículas, sangre, anillos, divisiones, manos espectrales, rayos y números de daño.
+function updateEffects(dt){
   // Particles
   for(let i=G.parts.length-1;i>=0;i--){
     const pt=G.parts[i];
@@ -3861,7 +3908,10 @@ function update(dt){
     d.x+=d.vx*dt; d.y+=d.vy*dt; {const dk=Math.pow(.9,dt*60); d.vy*=dk; d.vx*=dk;} d.life-=dt;
     if(d.life<=0)G.dmgNums.splice(i,1);
   }
+}
 
+// Oleada por tiempo, aparición del jefe y de Lilith, y generación de enemigos comunes.
+function updateSpawner(dt){
   // Wave & Boss trigger
   G.wave=1+Math.floor(G.time/25); G.spI=Math.max(.5,2.2-G.wave*.15);
   if(G.wave>=10 && !G.bossSpawned){ G.bossSpawned=true; spawnBoss(); }
@@ -3874,7 +3924,11 @@ function update(dt){
     G.spT-=dt;
     if(G.spT<=0){if(G.enemies.length<180){const n=1+Math.floor(G.wave*.5);for(let i=0;i<n&&G.enemies.length<180;i++)spawnEnemy();}G.spT=G.spI;}
   }
+}
 
+// Rey Liche: persecución, fases, golpe cuerpo a cuerpo, abanico de proyectiles y animación de muerte.
+// Devuelve true si su golpe mató al héroe.
+function updateBoss(dt){
   // Boss update
   if(G.bossAlive && G.boss && G.boss.alive){
     const boss=G.boss, p=G.p;
@@ -3900,7 +3954,7 @@ function update(dt){
       const dmgMult=1-Math.min(ARMOR_MAX,p.up.armor||0);
       const phaseDmg=boss.phase===3?boss.atk*2.2:boss.phase===2?boss.atk*1.5:boss.atk;
       p.hp-=phaseDmg*BOSS_CONTACT_HIT_MULT*dmgMult; p.dmgF=.15; p.invT=.32; sndDamage(); addShake(7);
-      if(p.hp<=0){ p.hp=0; endGame(); return; }
+      if(p.hp<=0){ p.hp=0; endGame(); return true; }
     }
 
     // Boss ranged attack — abanico de proyectiles apuntado al héroe en fase 2+
@@ -3944,7 +3998,10 @@ function update(dt){
 
   // Boss announce timer
   if(G.bossAnnounce>0) G.bossAnnounce-=dt;
+}
 
+// Lilith: se acerca hasta su rango y golpea en área; su daño se duplica con cada golpe. Devuelve true si mató al héroe.
+function updateLilith(dt){
   // Lilith, Hija del Odio — update (se acerca solo hasta su rango de ataque, luego golpea en área a distancia; inmortal, escala su daño con cada golpe)
   if(G.lilithAlive && G.lilith){
     const lilith=G.lilith, p=G.p;
@@ -3975,12 +4032,15 @@ function update(dt){
       p.hp-=lilith.atk; p.dmgF=.25;
       sndDamage();
       lilith.atk*=2; // el daño de su PRÓXIMO golpe se duplica, para siempre
-      if(p.hp<=0){ p.hp=0; endGame(); return; }
+      if(p.hp<=0){ p.hp=0; endGame(); return true; }
     }
 
     updateLilithSpriteAnim(dt);
   }
+}
 
+// Proyectiles del jefe. Devuelve true si mataron al héroe.
+function updateBossProjectiles(dt){
   // Boss projectiles update & collision
   if(G.bossProjs){
     const p=G.p;
@@ -3996,13 +4056,10 @@ function update(dt){
         const dmgMult=1-Math.min(ARMOR_MAX,p.up.armor||0);
         p.hp-=BOSS_PROJ_DMG*dmgMult; p.dmgF=.15; p.invT=.38; sndDamage(); addShake(5);
         G.bossProjs.splice(i,1);
-        if(p.hp<=0){ p.hp=0; endGame(); return; }
+        if(p.hp<=0){ p.hp=0; endGame(); return true; }
       }
     }
   }
-  // Red de seguridad: si por cualquier vía la vida llegó a 0 sin comprobarse, se termina la partida
-  if(G.run && G.p.hp<=0){ G.p.hp=0; endGame(); return; }
-  updHUD();
 }
 
 // ─── ILUMINACIÓN DINÁMICA (solo con FX_HIGH) ─────────────────────────────────
