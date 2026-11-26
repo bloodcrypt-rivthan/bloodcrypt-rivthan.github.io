@@ -1047,9 +1047,18 @@ function startGame(){
 }
 function restartGame(){document.getElementById('gover').style.display='none'; startGame();}
 
+// Todos los arrays de una partida, vacíos y nuevos. Es la única lista: un array nuevo de G se agrega ACÁ
+// (no inicializarlo después con if(!G.x) G.x=[], ni proteger su uso con if(G.x)). La usan initG() y el G del arranque (menú),
+// así G tiene siempre la misma forma, haya partida o no.
+function freshRunLists(){
+  return {enemies:[],projs:[],parts:[],orbs:[],meleeEff:[],dmgNums:[],bloodSplats:[],
+          skeletons:[],thralls:[],thrallProjs:[],bones:[],                   // nigromante y Yoko
+          arrowQueue:[],shurPts:[],rains:[],rainArrows:[],traps:[],trapFX:[], // arquero
+          bossProjs:[],eProjs:[],spectralFX:[],lightningFX:[],splitFx:[]};
+}
 function initG(){
   const ch=CHARS[selChar];
-  G={run:true,time:0,kills:0,gold:0,saved:false,wave:1,spT:0,spI:2.2,cam:{x:0,y:0},lvlPending:false,totalCrits:0,rerollsLeft:0,furyTimer:0,skeletons:[],summonTimer:0,boss:null,bossAlive:false,bossAnnounce:0,bossSpawned:false,bossProjs:[],eProjs:[],thralls:[],thrallProjs:[],spectralFX:[],lightningFX:[],lightningT:0,shurAng:0,shurPts:[],arrowQueue:[],stealthT:4,invisPos:{x:0,y:0},rains:[],rainArrows:[],rainT:3,traps:[],trapFX:[],trapT:3,bones:[],shake:0,shakeX:0,shakeY:0,lvlUpFlash:0,
+  G={...freshRunLists(),run:true,time:0,kills:0,gold:0,saved:false,wave:1,spT:0,spI:2.2,cam:{x:0,y:0},lvlPending:false,totalCrits:0,rerollsLeft:0,furyTimer:0,summonTimer:0,boss:null,bossAlive:false,bossAnnounce:0,bossSpawned:false,lightningT:0,shurAng:0,stealthT:4,invisPos:{x:0,y:0},rainT:3,trapT:3,shake:0,shakeX:0,shakeY:0,lvlUpFlash:0,
     lilith:null,lilithAlive:false,lilithSpawned:false,lilithAnnounce:0,
     p:{x:0,y:0,hp:ch.hp,mhp:ch.hp,atk:ch.atk,spd:ch.spd,range:ch.range,rate:ch.rate,
        atkt:0,id:ch.id,melee:ch.melee,col:ch.col,sc:ch.sc,name:ch.name,
@@ -1058,8 +1067,7 @@ function initG(){
        charging:false,chargeT:0,chargeVx:0,chargeVy:0,chargeHit:new Set(),chargeDmgBonus:0,facingAng:0,
        chargeExtraUsed:false,
        bloodlustActive:false,bloodlustT:0,bloodlustCD:BLOODLUST_COOLDOWN,
-       necro:ch.necro||false, yoko:ch.yoko||false, mage:ch.mage||false, archer:ch.archer||false},
-    enemies:[],projs:[],parts:[],orbs:[],meleeEff:[],dmgNums:[],bloodSplats:[]};
+       necro:ch.necro||false, yoko:ch.yoko||false, mage:ch.mage||false, archer:ch.archer||false}};
   document.getElementById('char-name').textContent=ch.name+' · LV ';
   document.getElementById('char-name').appendChild(document.createTextNode(''));
   document.getElementById('char-name').innerHTML=ch.name+' · LV <span id="hlv">1</span>';
@@ -1243,7 +1251,7 @@ function mageSplit(pr,victim){
       mage:true,gen:gen+1,fam,hit:fam.hit,home:t,arm:MAGE_CHILD_ARM});
   });
   spParts(x,y,'#e6aaff',8);
-  (G.splitFx||(G.splitFx=[])).push({x,y,life:.28});                   // anillo de destello en el punto de la división
+  G.splitFx.push({x,y,life:.28});                   // anillo de destello en el punto de la división
 }
 // ─── ARQUERO ──────────────────────────────────────────────────────────────────
 const ARROW_SPEED=520, ARROW_PIERCE_DECAY=.85;   // las flechas son rápidas; cada enemigo atravesado resta 15% de daño
@@ -1282,14 +1290,13 @@ function doArcherShoot(){
   if(hasSpr){
     // La flecha sale cuando el sprite SUELTA la cuerda (último frame de la animación de ataque)
     const[,count,fps]=SPRITE_CFG.archer.anims.attack;
-    if(!G.arrowQueue) G.arrowQueue=[];
     G.arrowQueue.push({t:(count-1)/fps,proj,ox,oy});
   } else { sndArrow(); if(charged) sndCharged(); G.projs.push(proj); }
   triggerSprAttack(p);
 }
 // Cola de flechas pendientes: sale cada flecha cuando termina su tiempo de preparación
 function updateArrowQueue(dt){
-  if(!G.arrowQueue||!G.arrowQueue.length) return;
+  if(!G.arrowQueue.length) return;
   const p=G.p;
   for(let i=G.arrowQueue.length-1;i>=0;i--){
     const q=G.arrowQueue[i]; q.t-=dt;
@@ -1371,8 +1378,6 @@ function sndTrapSnap(){
 }
 function updateRain(dt){
   const p=G.p, lvl=p.up.rainLevel||0;
-  if(!G.rains) G.rains=[]; if(!G.rainArrows) G.rainArrows=[];
-  if(typeof G.rainT!=='number') G.rainT=3;
   if(lvl>0){
     G.rainT-=dt;
     if(G.rainT<=0){
@@ -1417,8 +1422,6 @@ function updateRain(dt){
 }
 function updateTraps(dt){
   const p=G.p, lvl=p.up.trapLevel||0;
-  if(!G.traps) G.traps=[]; if(!G.trapFX) G.trapFX=[];
-  if(typeof G.trapT!=='number') G.trapT=3;
   if(lvl>0){
     G.trapT-=dt;
     if(G.trapT<=0){
@@ -1460,21 +1463,21 @@ function drawArrowGlyph(x,y,ang,len){
 }
 // Capa de suelo (bajo los enemigos): áreas de lluvia, flechas clavadas y trampas
 function drawArcherGround(cx,cy){
-  if(G.rains) for(const r of G.rains){
+  for(const r of G.rains){
     const k=Math.min(1,(r.dur+RAIN_FALL-r.t)/.4), pulse=.5+.5*Math.sin(r.t*8);
     ctx.save();
     ctx.globalAlpha=.5*k; ctx.fillStyle='rgba(90,160,60,.12)'; ctx.strokeStyle='rgba(150,220,100,'+(.35+.2*pulse)+')'; ctx.lineWidth=2;
     ctx.beginPath(); ctx.arc(r.x+cx,r.y+cy,r.r,0,PI*2); ctx.fill(); ctx.setLineDash([6,5]); ctx.stroke();
     ctx.restore();
   }
-  if(G.rainArrows) for(const a of G.rainArrows){
+  for(const a of G.rainArrows){
     if(!a.done) continue;
     const k=1-(a.t-RAIN_FALL)/.5;
     ctx.save(); ctx.globalAlpha=Math.max(0,k);
     drawArrowGlyph(a.x+cx,a.y+cy-9,PI/2+.12,7);
     ctx.restore();
   }
-  if(G.traps) for(const tr of G.traps){
+  for(const tr of G.traps){
     if(tr.t>TRAP_LIFE-4 && Math.floor(tr.t*6)%2===0) continue; // parpadea antes de desaparecer
     const x=tr.x+cx, y=tr.y+cy, armed=tr.t>=TRAP_ARM;
     ctx.save(); ctx.translate(x,y);
@@ -1492,19 +1495,19 @@ function drawArcherGround(cx,cy){
 }
 // Capa aérea (sobre los enemigos): flechas de la lluvia cayendo, explosiones de trampas y shurikens
 function drawArcherAir(cx,cy){
-  if(G.rainArrows) for(const a of G.rainArrows){
+  for(const a of G.rainArrows){
     if(a.done) continue;
     const k=a.t/RAIN_FALL;
     drawArrowGlyph(a.x+cx,a.y+cy-(1-k)*170-9,PI/2,8);
   }
-  if(G.trapFX) for(const f of G.trapFX){
+  for(const f of G.trapFX){
     const k=f.t/f.life;
     ctx.save();
     ctx.globalAlpha=(1-k)*.7; ctx.strokeStyle='#ffb347'; ctx.lineWidth=3; ctx.fillStyle='rgba(255,170,60,.18)';
     ctx.beginPath(); ctx.arc(f.x+cx,f.y+cy,f.r*(.25+.75*k),0,PI*2); ctx.fill(); ctx.stroke();
     ctx.restore();
   }
-  if(G.shurPts && G.shurPts.length){
+  if(G.shurPts.length){
     for(const sp of G.shurPts){
       ctx.save(); ctx.translate(sp.x+cx,sp.y+cy); ctx.rotate((G.shurAng||0)*7);
       ctx.shadowColor='#9fb4d0'; ctx.shadowBlur=9;
@@ -1531,7 +1534,6 @@ function sndStealth(){
 // SIGILO: cada cierto tiempo el héroe se vuelve invisible; los enemigos comunes lo pierden (los jefes no se dejan engañar)
 function updateStealth(dt){
   const p=G.p, lvl=p.up.stealthLevel||0;
-  if(typeof G.stealthT!=='number') G.stealthT=4;
   if(p.ambushT>0){ p.ambushT-=dt; if(p.ambushT<=0) p.ambush=false; }   // la emboscada dura 1.5 s tras reaparecer
   if(lvl<=0) return;
   if(p.invisT>0){
@@ -1627,7 +1629,6 @@ function enslaveEnemy(e){
   spawnDmgNum(e.x,e.y-e.sz*2,'ESCLAVIZADO',false,true);
   sndSummon();
   addShake(5);
-  if(!G.thralls) G.thralls=[];
   G.thralls.push({
     isBoss:false,
     name:e.name, x:e.x, y:e.y,
@@ -1646,7 +1647,6 @@ function enslaveBoss(boss){
   spParts(boss.x,boss.y,'#44ffaa',60);
   spawnDmgNum(boss.x,boss.y-boss.sz*3,'¡ESCLAVIZADO!',false,true);
   sndSummon(); addShake(15);
-  if(!G.thralls) G.thralls=[];
   G.thralls.push({
     isBoss:true,
     name:'liche', x:boss.x, y:boss.y,
@@ -1913,14 +1913,12 @@ function updateYokoCharge(dt){
 // Un hueso no recogido se mantiene BONE_SOLID_TIME segundos (×DOBLE HUESO) y luego se desvanece lentamente durante BONE_FADE_TIME
 const BONE_SOLID_TIME=6, BONE_FADE_TIME=2.5;
 function buryBone(x,y){
-  if(!G.bones) G.bones=[];
   const boneLt=BONE_SOLID_TIME*(G.p.up.boneDuration||1)+BONE_FADE_TIME;
   G.bones.push({x,y,life:boneLt,ml:boneLt,bob:rf(0,PI*2)});
 }
 
 function updateBones(dt){
   const p=G.p;
-  if(!G.bones) G.bones=[];
   for(let i=G.bones.length-1;i>=0;i--){
     const b=G.bones[i];
     b.life-=dt; b.bob+=dt*2;
@@ -2025,7 +2023,6 @@ function doNecroAttack(){
     });
     if(hitBossSnd) sndBossHit(); else if(hitSnd) sndHit();
     if(hit){ sndSummon(); G.meleeEff.push({x:p.x,y:p.y,life:.3,range,col:'#44ffaa'}); }
-    G.spectralFX=G.spectralFX||[];
     G.spectralFX.push({type:'circle',x:p.x,y:p.y,life:.35,ml:.35,range});
     return;
   }
@@ -2052,7 +2049,6 @@ function doNecroAttack(){
 
   const coneHalfAngle = PI/6; // ~30° de medio-ángulo → cono de 60°
   let anyHit=false;
-  G.spectralFX=G.spectralFX||[];
 
   dirs.forEach(ang=>{
     G.spectralFX.push({type:'cone',x:p.x,y:p.y,ang,life:.28,ml:.28,range,half:coneHalfAngle});
@@ -2221,7 +2217,6 @@ function updateSkelSpriteAnim(sk,dt,moving){
 
 function updateThralls(dt){
   const p=G.p;
-  if(!G.thralls) G.thralls=[];
   const claimed=new Set(G.skeletons.map(sk=>sk.targetId).filter(id=>id!=null));
 
   for(let i=G.thralls.length-1;i>=0;i--){
@@ -2309,7 +2304,6 @@ function updateThralls(dt){
   }
 
   // Proyectiles de warlock esclavizado
-  if(!G.thrallProjs) G.thrallProjs=[];
   for(let i=G.thrallProjs.length-1;i>=0;i--){
     const pr=G.thrallProjs[i];
     if(!pr.trail) pr.trail=[];
@@ -2442,25 +2436,23 @@ function drawThrall(th,cx,cy){
 
 // Proyectiles de los esclavos warlock
 function drawThrallProjs(cx,cy){
-  if(G.thrallProjs){
-    G.thrallProjs.forEach(pr=>{
-      if(pr.trail){
-        for(let i=0;i<pr.trail.length;i++){
-          const tp=pr.trail[i];
-          ctx.globalAlpha=(i/pr.trail.length)*.35;
-          ctx.fillStyle='#44ffaa';
-          ctx.beginPath(); ctx.arc(tp.x+cx,tp.y+cy,(i/pr.trail.length)*3.5,0,PI*2); ctx.fill();
-        }
-        ctx.globalAlpha=1;
+  G.thrallProjs.forEach(pr=>{
+    if(pr.trail){
+      for(let i=0;i<pr.trail.length;i++){
+        const tp=pr.trail[i];
+        ctx.globalAlpha=(i/pr.trail.length)*.35;
+        ctx.fillStyle='#44ffaa';
+        ctx.beginPath(); ctx.arc(tp.x+cx,tp.y+cy,(i/pr.trail.length)*3.5,0,PI*2); ctx.fill();
       }
-      const px=pr.x+cx, py=pr.y+cy;
-      ctx.save();
-      ctx.shadowColor='#44ffaa'; ctx.shadowBlur=12;
-      ctx.fillStyle='#aaffcc';
-      ctx.beginPath(); ctx.arc(px,py,5,0,PI*2); ctx.fill();
-      ctx.restore();
-    });
-  }
+      ctx.globalAlpha=1;
+    }
+    const px=pr.x+cx, py=pr.y+cy;
+    ctx.save();
+    ctx.shadowColor='#44ffaa'; ctx.shadowBlur=12;
+    ctx.fillStyle='#aaffcc';
+    ctx.beginPath(); ctx.arc(px,py,5,0,PI*2); ctx.fill();
+    ctx.restore();
+  });
 }
 
 // Dibuja un esqueleto aliado (una llamada por esqueleto, para poder ordenarlos por profundidad con el resto)
@@ -3799,7 +3791,7 @@ function updateEnemies(dt){
     }
 
     // Enemigo ataca al esqueleto más cercano si está en rango (en vez del jugador)
-    if(G.skeletons && G.skeletons.length>0){
+    if(G.skeletons.length>0){
       let nearestSk=null, nearestD=Infinity;
       for(const sk of G.skeletons){
         if(!sk.alive) continue;
@@ -3824,7 +3816,6 @@ function updateEnemies(dt){
 function updateEnemyProjectiles(dt){
   const p=G.p;
   // Proyectiles enemigos (warlock)
-  if(!G.eProjs) G.eProjs=[];
   for(let i=G.eProjs.length-1;i>=0;i--){
     const pr=G.eProjs[i];
     if(!pr.trail) pr.trail=[];
@@ -3893,8 +3884,8 @@ function updateEffects(dt){
     if(b.life<=0)G.bloodSplats.splice(i,1);
   }
   for(let i=G.meleeEff.length-1;i>=0;i--){G.meleeEff[i].life-=dt;if(G.meleeEff[i].life<=0)G.meleeEff.splice(i,1);}
-  if(G.splitFx) for(let i=G.splitFx.length-1;i>=0;i--){G.splitFx[i].life-=dt;if(G.splitFx[i].life<=0)G.splitFx.splice(i,1);}
-  if(G.spectralFX) for(let i=G.spectralFX.length-1;i>=0;i--){G.spectralFX[i].life-=dt;if(G.spectralFX[i].life<=0)G.spectralFX.splice(i,1);}
+  for(let i=G.splitFx.length-1;i>=0;i--){G.splitFx[i].life-=dt;if(G.splitFx[i].life<=0)G.splitFx.splice(i,1);}
+  for(let i=G.spectralFX.length-1;i>=0;i--){G.spectralFX[i].life-=dt;if(G.spectralFX[i].life<=0)G.spectralFX.splice(i,1);}
   updateLightning(dt);
   for(let i=G.lightningFX.length-1;i>=0;i--){
     const fx=G.lightningFX[i];
@@ -4042,22 +4033,20 @@ function updateLilith(dt){
 // Proyectiles del jefe. Devuelve true si mataron al héroe.
 function updateBossProjectiles(dt){
   // Boss projectiles update & collision
-  if(G.bossProjs){
-    const p=G.p;
-    for(let i=G.bossProjs.length-1;i>=0;i--){
-      const pr=G.bossProjs[i];
-      pr.x+=pr.vx*dt; pr.y+=pr.vy*dt; pr.life-=dt;
-      if(pr.life<=0){G.bossProjs.splice(i,1);continue;}
-      if(!pr.trail) pr.trail=[];
-      pr.trail.push({x:pr.x,y:pr.y});
-      if(pr.trail.length>8) pr.trail.shift();
-      const dx=pr.x-p.x, dy=pr.y-p.y;
-      if(Math.sqrt(dx*dx+dy*dy)<16 && p.invT<=0){
-        const dmgMult=1-Math.min(ARMOR_MAX,p.up.armor||0);
-        p.hp-=BOSS_PROJ_DMG*dmgMult; p.dmgF=.15; p.invT=.38; sndDamage(); addShake(5);
-        G.bossProjs.splice(i,1);
-        if(p.hp<=0){ p.hp=0; endGame(); return true; }
-      }
+  const p=G.p;
+  for(let i=G.bossProjs.length-1;i>=0;i--){
+    const pr=G.bossProjs[i];
+    pr.x+=pr.vx*dt; pr.y+=pr.vy*dt; pr.life-=dt;
+    if(pr.life<=0){G.bossProjs.splice(i,1);continue;}
+    if(!pr.trail) pr.trail=[];
+    pr.trail.push({x:pr.x,y:pr.y});
+    if(pr.trail.length>8) pr.trail.shift();
+    const dx=pr.x-p.x, dy=pr.y-p.y;
+    if(Math.sqrt(dx*dx+dy*dy)<16 && p.invT<=0){
+      const dmgMult=1-Math.min(ARMOR_MAX,p.up.armor||0);
+      p.hp-=BOSS_PROJ_DMG*dmgMult; p.dmgF=.15; p.invT=.38; sndDamage(); addShake(5);
+      G.bossProjs.splice(i,1);
+      if(p.hp<=0){ p.hp=0; endGame(); return true; }
     }
   }
 }
@@ -4099,8 +4088,8 @@ function collectEntityLights(cx,cy,W,H,p){
   let n=0;
   for(const pr of G.projs){ if(pr.arrow) continue; if(n>=LIGHT_MAX_DYN) break;
     addLight(pr.x+cx,pr.y+cy,pr.sz*6+50,.8,pr.isCrit?'#ff8800':pr.col); n++; }
-  if(G.eProjs) for(const pr of G.eProjs){ if(n>=LIGHT_MAX_DYN) break; addLight(pr.x+cx,pr.y+cy,70,.7,pr.col||'#44ffff'); n++; }
-  if(G.bossProjs) for(const pr of G.bossProjs){ if(n>=LIGHT_MAX_DYN) break; addLight(pr.x+cx,pr.y+cy,80,.8,'#aa66ff'); n++; }
+  for(const pr of G.eProjs){ if(n>=LIGHT_MAX_DYN) break; addLight(pr.x+cx,pr.y+cy,70,.7,pr.col||'#44ffff'); n++; }
+  for(const pr of G.bossProjs){ if(n>=LIGHT_MAX_DYN) break; addLight(pr.x+cx,pr.y+cy,80,.8,'#aa66ff'); n++; }
   const b=G.boss;
   if(b&&(b.alive||b.deathT>0)){
     const ph=b.phase===3?'#ff4400':b.phase===2?'#aa44ff':'#6622cc';
@@ -4167,8 +4156,8 @@ function drawDepthSorted(cx,cy,W,H,p,cam){
   for(const e of G.enemies) if(e.alive) _dqPush(e.y+e.sz*.6,0,e);
   if(G.boss) _dqPush(G.boss.y+G.boss.sz*.9,1,G.boss);
   if(G.lilith) _dqPush(G.lilith.y+G.lilith.sz*.9,2,G.lilith);
-  if(G.skeletons) for(const sk of G.skeletons) _dqPush(sk.y+10,3,sk);
-  if(G.thralls) for(const th of G.thralls) if(th.alive) _dqPush(th.y+th.sz*.6,4,th);
+  for(const sk of G.skeletons) _dqPush(sk.y+10,3,sk);
+  for(const th of G.thralls) if(th.alive) _dqPush(th.y+th.sz*.6,4,th);
   _dqPush(cam.y+2,5,p); // el héroe siempre se dibuja en el centro de la pantalla, que equivale a la cámara
   const list=_dq.slice(0,_dqN).sort((a,b)=>a.y-b.y); // sort estable: a igual y se conserva el orden anterior
   for(let i=0;i<list.length;i++){
@@ -4212,77 +4201,75 @@ function draw(){
   }
 
   // Manos espectrales del Necromancer (conos + onda circular)
-  if(G.spectralFX){
-    G.spectralFX.forEach(fx=>{
-      const t=fx.life/fx.ml;
-      const sx=fx.x+cx, sy=fx.y+cy;
-      ctx.save();
-      if(fx.type==='cone'){
-        // Cono de daño — relleno translúcido + borde
-        ctx.globalAlpha=t*.35;
-        ctx.fillStyle='#44ffaa';
-        // el blur sobre un sector tan grande es muy caro (y con 4-8 conos a la vez, peor): solo con pocos conos activos
-        if(G.spectralFX.length<=2){ ctx.shadowColor='#44ffaa'; ctx.shadowBlur=14; }
-        ctx.beginPath();
-        ctx.moveTo(sx,sy);
-        ctx.arc(sx,sy,fx.range*(0.9+(1-t)*.25),fx.ang-fx.half,fx.ang+fx.half);
-        ctx.closePath(); ctx.fill();
-        ctx.globalAlpha=t*.6;
-        ctx.strokeStyle='#88ffcc'; ctx.lineWidth=1.5;
-        ctx.stroke();
+  G.spectralFX.forEach(fx=>{
+    const t=fx.life/fx.ml;
+    const sx=fx.x+cx, sy=fx.y+cy;
+    ctx.save();
+    if(fx.type==='cone'){
+      // Cono de daño — relleno translúcido + borde
+      ctx.globalAlpha=t*.35;
+      ctx.fillStyle='#44ffaa';
+      // el blur sobre un sector tan grande es muy caro (y con 4-8 conos a la vez, peor): solo con pocos conos activos
+      if(G.spectralFX.length<=2){ ctx.shadowColor='#44ffaa'; ctx.shadowBlur=14; }
+      ctx.beginPath();
+      ctx.moveTo(sx,sy);
+      ctx.arc(sx,sy,fx.range*(0.9+(1-t)*.25),fx.ang-fx.half,fx.ang+fx.half);
+      ctx.closePath(); ctx.fill();
+      ctx.globalAlpha=t*.6;
+      ctx.strokeStyle='#88ffcc'; ctx.lineWidth=1.5;
+      ctx.stroke();
 
-        // Mano espectral fantasmal en la punta del cono
-        const handDist=fx.range*0.7;
-        const hx=sx+Math.cos(fx.ang)*handDist, hy=sy+Math.sin(fx.ang)*handDist;
-        ctx.globalAlpha=t*.85;
-        ctx.save();
-        ctx.translate(hx,hy); ctx.rotate(fx.ang);
-        ctx.shadowColor='#44ffaa'; ctx.shadowBlur=10;
-        ctx.fillStyle='rgba(150,255,200,.7)';
-        // Palma
-        ctx.beginPath(); ctx.ellipse(0,0,9,12,0,0,PI*2); ctx.fill();
-        // Dedos — 4 garras extendidas hacia adelante
-        ctx.strokeStyle='rgba(150,255,200,.8)'; ctx.lineWidth=2.2; ctx.lineCap='round';
-        for(let i=-1.5;i<=1.5;i++){
-          ctx.beginPath();
-          ctx.moveTo(i*4,-6);
-          ctx.lineTo(i*5,-16-Math.abs(i)*2);
-          ctx.stroke();
-        }
-        // Pulgar
-        ctx.beginPath(); ctx.moveTo(-8,2); ctx.lineTo(-13,6); ctx.stroke();
-        ctx.restore();
-      } else if(fx.type==='circle'){
-        // Onda circular — nivel 5
-        ctx.globalAlpha=t*.4;
-        ctx.strokeStyle='#44ffaa'; ctx.lineWidth=4*t+1;
-        // sin shadowBlur (círculo enorme): brillo falso con un trazo ancho y tenue debajo del anillo
-        ctx.save(); ctx.globalAlpha=t*.16; ctx.lineWidth=10*t+4;
-        ctx.beginPath(); ctx.arc(sx,sy,fx.range*(1-t*.1),0,PI*2); ctx.stroke();
-        ctx.restore();
+      // Mano espectral fantasmal en la punta del cono
+      const handDist=fx.range*0.7;
+      const hx=sx+Math.cos(fx.ang)*handDist, hy=sy+Math.sin(fx.ang)*handDist;
+      ctx.globalAlpha=t*.85;
+      ctx.save();
+      ctx.translate(hx,hy); ctx.rotate(fx.ang);
+      ctx.shadowColor='#44ffaa'; ctx.shadowBlur=10;
+      ctx.fillStyle='rgba(150,255,200,.7)';
+      // Palma
+      ctx.beginPath(); ctx.ellipse(0,0,9,12,0,0,PI*2); ctx.fill();
+      // Dedos — 4 garras extendidas hacia adelante
+      ctx.strokeStyle='rgba(150,255,200,.8)'; ctx.lineWidth=2.2; ctx.lineCap='round';
+      for(let i=-1.5;i<=1.5;i++){
         ctx.beginPath();
-        ctx.arc(sx,sy,fx.range*(1-t*.1),0,PI*2);
+        ctx.moveTo(i*4,-6);
+        ctx.lineTo(i*5,-16-Math.abs(i)*2);
         ctx.stroke();
-        ctx.shadowBlur=0;
-        ctx.globalAlpha=t*.15;
-        ctx.fillStyle='#44ffaa';
-        ctx.beginPath(); ctx.arc(sx,sy,fx.range*(1-t*.1),0,PI*2); ctx.fill();
-        // 8 manos espectrales orbitando el círculo
-        for(let i=0;i<8;i++){
-          const ang=(i/8)*PI*2;
-          const hx=sx+Math.cos(ang)*fx.range*.85, hy=sy+Math.sin(ang)*fx.range*.85;
-          ctx.save();
-          ctx.globalAlpha=t*.7;
-          ctx.translate(hx,hy); ctx.rotate(ang);
-          ctx.shadowBlur=0;
-          ctx.fillStyle='rgba(150,255,200,.6)';
-          ctx.beginPath(); ctx.ellipse(0,0,7,9,0,0,PI*2); ctx.fill();
-          ctx.restore();
-        }
       }
+      // Pulgar
+      ctx.beginPath(); ctx.moveTo(-8,2); ctx.lineTo(-13,6); ctx.stroke();
       ctx.restore();
-    });
-  }
+    } else if(fx.type==='circle'){
+      // Onda circular — nivel 5
+      ctx.globalAlpha=t*.4;
+      ctx.strokeStyle='#44ffaa'; ctx.lineWidth=4*t+1;
+      // sin shadowBlur (círculo enorme): brillo falso con un trazo ancho y tenue debajo del anillo
+      ctx.save(); ctx.globalAlpha=t*.16; ctx.lineWidth=10*t+4;
+      ctx.beginPath(); ctx.arc(sx,sy,fx.range*(1-t*.1),0,PI*2); ctx.stroke();
+      ctx.restore();
+      ctx.beginPath();
+      ctx.arc(sx,sy,fx.range*(1-t*.1),0,PI*2);
+      ctx.stroke();
+      ctx.shadowBlur=0;
+      ctx.globalAlpha=t*.15;
+      ctx.fillStyle='#44ffaa';
+      ctx.beginPath(); ctx.arc(sx,sy,fx.range*(1-t*.1),0,PI*2); ctx.fill();
+      // 8 manos espectrales orbitando el círculo
+      for(let i=0;i<8;i++){
+        const ang=(i/8)*PI*2;
+        const hx=sx+Math.cos(ang)*fx.range*.85, hy=sy+Math.sin(ang)*fx.range*.85;
+        ctx.save();
+        ctx.globalAlpha=t*.7;
+        ctx.translate(hx,hy); ctx.rotate(ang);
+        ctx.shadowBlur=0;
+        ctx.fillStyle='rgba(150,255,200,.6)';
+        ctx.beginPath(); ctx.ellipse(0,0,7,9,0,0,PI*2); ctx.fill();
+        ctx.restore();
+      }
+    }
+    ctx.restore();
+  });
 
   // Rayos (mejora RAYO): zigzag desde el cielo hasta el enemigo + destello de impacto
   for(const fx of G.lightningFX){
@@ -4312,7 +4299,7 @@ function draw(){
   }
 
   // Anillo de destello de la división de los orbes del Mago
-  if(G.splitFx) for(const sf of G.splitFx){
+  for(const sf of G.splitFx){
     const t=sf.life/.28, r=7+(1-t)*26;
     ctx.save(); ctx.globalAlpha=t*.85; ctx.strokeStyle='#f0c8ff'; ctx.lineWidth=1+t*2.5;
     ctx.beginPath(); ctx.arc(sf.x+cx,sf.y+cy,r,0,PI*2); ctx.stroke();
@@ -4348,32 +4335,30 @@ function draw(){
   }
 
   // Huesos enterrados (Yoko)
-  if(G.bones){
-    G.bones.forEach(b=>{
-      const sx=b.x+cx, sy=b.y+cy;
-      const bobY=Math.sin(b.bob)*2;
-      const fade = Math.min(1,b.life/BONE_FADE_TIME); // 1 mientras dura, baja lentamente a 0 en la fase final
-      ctx.save();
-      ctx.globalAlpha=fade;
-      // Halo dorado
-      ctx.shadowColor='#ffcc66'; ctx.shadowBlur=12;
-      ctx.globalAlpha*=0.25;
-      ctx.fillStyle='#ffcc66';
-      ctx.beginPath(); ctx.arc(sx,sy,12,0,PI*2); ctx.fill();
-      ctx.globalAlpha=fade;
-      // Hueso pixelado simple
-      ctx.shadowBlur=6;
-      ctx.fillStyle='#f0e0c0';
-      ctx.save(); ctx.translate(sx,sy+bobY);
-      ctx.fillRect(-7,-2,14,4);
-      ctx.beginPath(); ctx.arc(-7,-2,2.5,0,PI*2); ctx.fill();
-      ctx.beginPath(); ctx.arc(-7,2,2.5,0,PI*2); ctx.fill();
-      ctx.beginPath(); ctx.arc(7,-2,2.5,0,PI*2); ctx.fill();
-      ctx.beginPath(); ctx.arc(7,2,2.5,0,PI*2); ctx.fill();
-      ctx.restore();
-      ctx.restore();
-    });
-  }
+  G.bones.forEach(b=>{
+    const sx=b.x+cx, sy=b.y+cy;
+    const bobY=Math.sin(b.bob)*2;
+    const fade = Math.min(1,b.life/BONE_FADE_TIME); // 1 mientras dura, baja lentamente a 0 en la fase final
+    ctx.save();
+    ctx.globalAlpha=fade;
+    // Halo dorado
+    ctx.shadowColor='#ffcc66'; ctx.shadowBlur=12;
+    ctx.globalAlpha*=0.25;
+    ctx.fillStyle='#ffcc66';
+    ctx.beginPath(); ctx.arc(sx,sy,12,0,PI*2); ctx.fill();
+    ctx.globalAlpha=fade;
+    // Hueso pixelado simple
+    ctx.shadowBlur=6;
+    ctx.fillStyle='#f0e0c0';
+    ctx.save(); ctx.translate(sx,sy+bobY);
+    ctx.fillRect(-7,-2,14,4);
+    ctx.beginPath(); ctx.arc(-7,-2,2.5,0,PI*2); ctx.fill();
+    ctx.beginPath(); ctx.arc(-7,2,2.5,0,PI*2); ctx.fill();
+    ctx.beginPath(); ctx.arc(7,-2,2.5,0,PI*2); ctx.fill();
+    ctx.beginPath(); ctx.arc(7,2,2.5,0,PI*2); ctx.fill();
+    ctx.restore();
+    ctx.restore();
+  });
 
   // XP orbs — diamante con glow y estela
   // Los orbes ya no caducan, pueden acumularse: solo se dibujan los visibles y el glow (shadowBlur, caro) solo si hay pocos
@@ -4484,67 +4469,63 @@ function draw(){
   drawArcherAir(cx,cy);
 
   // Proyectiles enemigos (warlock) — orbes cyan con trail
-  if(G.eProjs){
-    G.eProjs.forEach(pr=>{
-      // Trail
-      if(pr.trail){
-        for(let i=0;i<pr.trail.length;i++){
-          const tp=pr.trail[i];
-          ctx.globalAlpha=(i/pr.trail.length)*.35;
-          ctx.fillStyle=pr.col;
-          ctx.beginPath(); ctx.arc(tp.x+cx,tp.y+cy,(i/pr.trail.length)*3.5,0,PI*2); ctx.fill();
-        }
-        ctx.globalAlpha=1;
+  G.eProjs.forEach(pr=>{
+    // Trail
+    if(pr.trail){
+      for(let i=0;i<pr.trail.length;i++){
+        const tp=pr.trail[i];
+        ctx.globalAlpha=(i/pr.trail.length)*.35;
+        ctx.fillStyle=pr.col;
+        ctx.beginPath(); ctx.arc(tp.x+cx,tp.y+cy,(i/pr.trail.length)*3.5,0,PI*2); ctx.fill();
       }
-      const px=pr.x+cx, py=pr.y+cy;
-      ctx.save();
-      ctx.shadowColor=pr.col; ctx.shadowBlur=14;
-      ctx.globalAlpha=0.28;
-      ctx.fillStyle=pr.col;
-      ctx.beginPath(); ctx.arc(px,py,8,0,PI*2); ctx.fill();
       ctx.globalAlpha=1;
-      ctx.fillStyle='#aaffff';
-      ctx.beginPath(); ctx.arc(px,py,4,0,PI*2); ctx.fill();
-      ctx.fillStyle='#ffffff'; ctx.shadowBlur=0;
-      ctx.beginPath(); ctx.arc(px-1,py-1,1.5,0,PI*2); ctx.fill();
-      ctx.restore();
-    });
-  }
+    }
+    const px=pr.x+cx, py=pr.y+cy;
+    ctx.save();
+    ctx.shadowColor=pr.col; ctx.shadowBlur=14;
+    ctx.globalAlpha=0.28;
+    ctx.fillStyle=pr.col;
+    ctx.beginPath(); ctx.arc(px,py,8,0,PI*2); ctx.fill();
+    ctx.globalAlpha=1;
+    ctx.fillStyle='#aaffff';
+    ctx.beginPath(); ctx.arc(px,py,4,0,PI*2); ctx.fill();
+    ctx.fillStyle='#ffffff'; ctx.shadowBlur=0;
+    ctx.beginPath(); ctx.arc(px-1,py-1,1.5,0,PI*2); ctx.fill();
+    ctx.restore();
+  });
 
   // Boss projectiles — orbes oscuros con trail
-  if(G.bossProjs){
-    G.bossProjs.forEach(pr=>{
-      const px=pr.x+cx, py=pr.y+cy;
-      // Trail de desvanecimiento
-      if(pr.trail){
-        for(let i=0;i<pr.trail.length;i++){
-          const t=pr.trail[i];
-          const ta=(i/pr.trail.length)*.4;
-          ctx.globalAlpha=ta;
-          ctx.fillStyle='#7744cc';
-          ctx.beginPath(); ctx.arc(t.x+cx,t.y+cy,(i/pr.trail.length)*4,0,PI*2); ctx.fill();
-        }
-        ctx.globalAlpha=1;
+  G.bossProjs.forEach(pr=>{
+    const px=pr.x+cx, py=pr.y+cy;
+    // Trail de desvanecimiento
+    if(pr.trail){
+      for(let i=0;i<pr.trail.length;i++){
+        const t=pr.trail[i];
+        const ta=(i/pr.trail.length)*.4;
+        ctx.globalAlpha=ta;
+        ctx.fillStyle='#7744cc';
+        ctx.beginPath(); ctx.arc(t.x+cx,t.y+cy,(i/pr.trail.length)*4,0,PI*2); ctx.fill();
       }
-      ctx.save();
-      // Halo exterior pulsante
-      const phase=G.boss?G.boss.phase:1;
-      const hcol=phase===3?'#ff4400':phase===2?'#cc44ff':'#aa88ff';
-      ctx.shadowColor=hcol; ctx.shadowBlur=18;
-      ctx.globalAlpha=0.3;
-      ctx.fillStyle=hcol;
-      ctx.beginPath(); ctx.arc(px,py,10,0,PI*2); ctx.fill();
       ctx.globalAlpha=1;
-      // Núcleo
-      ctx.fillStyle='#e8d8ff';
-      ctx.beginPath(); ctx.arc(px,py,5,0,PI*2); ctx.fill();
-      // Brillo
-      ctx.shadowBlur=0;
-      ctx.fillStyle='#ffffff';
-      ctx.beginPath(); ctx.arc(px-1.5,py-1.5,1.8,0,PI*2); ctx.fill();
-      ctx.restore();
-    });
-  }
+    }
+    ctx.save();
+    // Halo exterior pulsante
+    const phase=G.boss?G.boss.phase:1;
+    const hcol=phase===3?'#ff4400':phase===2?'#cc44ff':'#aa88ff';
+    ctx.shadowColor=hcol; ctx.shadowBlur=18;
+    ctx.globalAlpha=0.3;
+    ctx.fillStyle=hcol;
+    ctx.beginPath(); ctx.arc(px,py,10,0,PI*2); ctx.fill();
+    ctx.globalAlpha=1;
+    // Núcleo
+    ctx.fillStyle='#e8d8ff';
+    ctx.beginPath(); ctx.arc(px,py,5,0,PI*2); ctx.fill();
+    // Brillo
+    ctx.shadowBlur=0;
+    ctx.fillStyle='#ffffff';
+    ctx.beginPath(); ctx.arc(px-1.5,py-1.5,1.8,0,PI*2); ctx.fill();
+    ctx.restore();
+  });
 
   // Particles — círculos con glow
   // shadowBlur es lo más caro del canvas: el glow solo se dibuja mientras hay pocas partículas
@@ -5848,7 +5829,7 @@ function drawNecro(sx,sy,p){
                     p.sprAnim||'idle', p.sprFrame||0,
                     sx, sy, p.facingLeft||false, p.dmgF>0);
     // Aura de invocación si hay esqueletos
-    if(G.skeletons&&G.skeletons.length>0){
+    if(G.skeletons.length>0){
       const gw=Math.sin(p.animT*3)*.2+.25;
       ctx.shadowColor='#44ffaa'; ctx.shadowBlur=20;
       ctx.strokeStyle=`rgba(68,255,170,${gw})`; ctx.lineWidth=2;
@@ -5856,7 +5837,7 @@ function drawNecro(sx,sy,p){
       ctx.shadowBlur=0;
     }
     // Contador de esqueletos activos (mini HUD)
-    if(G.skeletons&&G.skeletons.length>0){
+    if(G.skeletons.length>0){
       const maxS=p.up.maxSkeletons||2;
       ctx.fillStyle='rgba(68,255,170,.8)';
       ctx.font=`bold 10px 'Courier New'`;
@@ -5872,7 +5853,7 @@ function drawNecro(sx,sy,p){
   ctx.beginPath();ctx.ellipse(sx,sy+10,9,3,0,0,PI*2);ctx.fill();
 
   // Aura de invocación si hay esqueletos
-  if(G.skeletons&&G.skeletons.length>0){
+  if(G.skeletons.length>0){
     const gw=Math.sin(p.animT*3)*.2+.25;
     ctx.shadowColor='#44ffaa'; ctx.shadowBlur=20;
     ctx.strokeStyle=`rgba(68,255,170,${gw})`; ctx.lineWidth=2;
@@ -5951,7 +5932,7 @@ function drawNecro(sx,sy,p){
   ctx.restore();
 
   // Contador de esqueletos activos (mini HUD)
-  if(G.skeletons&&G.skeletons.length>0){
+  if(G.skeletons.length>0){
     const maxS=p.up.maxSkeletons||2;
     ctx.fillStyle='rgba(68,255,170,.8)';
     ctx.font=`bold 10px 'Courier New'`;
@@ -6254,7 +6235,7 @@ function skillState(id,p){
   switch(id){
     case 'summon':{
       if(!p.necro) return null;
-      const max=up.maxSkeletons||2, n=G.skeletons?G.skeletons.length:0, iv=(up.summonRate||1)*8, T=G.summonTimer||0;
+      const max=up.maxSkeletons||2, n=G.skeletons.length, iv=(up.summonRate||1)*8, T=G.summonTimer||0;
       if(n>=max) return {lvl:0,frac:1,txt:'',ready:false,idle:true,tag:n+'/'+max};
       return {lvl:0,frac:Math.min(1,T/iv),txt:Math.max(0,iv-T).toFixed(1),ready:false,tag:n+'/'+max};
     }
@@ -6263,7 +6244,7 @@ function skillState(id,p){
     case 'lluvia':{ const l=up.rainLevel||0; if(l<=0) return null;
       return Object.assign({lvl:l},skCooldown(G.rainT,Math.max(4,9-1.2*(l-1)),0.5)); }
     case 'trampa':{ const l=up.trapLevel||0; if(l<=0) return null;
-      return Object.assign({lvl:l,tag:(G.traps?G.traps.length:0)+'/'+(1+l)},skCooldown(G.trapT,Math.max(2.5,6-.8*(l-1)),0)); }
+      return Object.assign({lvl:l,tag:G.traps.length+'/'+(1+l)},skCooldown(G.trapT,Math.max(2.5,6-.8*(l-1)),0)); }
     case 'sigilo':{ const l=up.stealthLevel||0; if(l<=0) return null;
       if(p.invisT>0) return {lvl:l,frac:1,txt:p.invisT.toFixed(1),ready:false,active:true};
       return Object.assign({lvl:l},skCooldown(G.stealthT,Math.max(7,16-2.5*(l-1)),0.5)); }
@@ -6463,7 +6444,7 @@ function endGame(){
 }
 
 // ─── BOOT ─────────────────────────────────────────────────────────────────────
-G={cam:{x:0,y:0},time:0,run:false,p:null,enemies:[],projs:[],parts:[],orbs:[],meleeEff:[],dmgNums:[],bloodSplats:[]};
+G={...freshRunLists(),cam:{x:0,y:0},time:0,run:false,p:null};
 loop();
 // Iniciar preview del menú al cargar
 buildCharDots(); updateCharCard(); startPreview(); updFxBtn(); updKnBtn();
