@@ -69,6 +69,7 @@ canvas{display:block}
 #debug-panel button:hover:not(:disabled){background:rgba(140,0,0,.9)}
 #debug-panel button:disabled{opacity:.35;cursor:not-allowed}
 #dbg-auto-lbl{background:rgba(80,0,0,.85);border:1px solid #a33;color:#fdd;font-size:11px;padding:4px 8px;cursor:pointer;border-radius:3px;font-family:'Courier New',monospace;display:flex;align-items:center;gap:4px;user-select:none}
+body:not(.debug-on) #debug-panel{display:none} /* js/debug.js pone .debug-on solo cuando el panel está prendido */
 /* ============ FIN DEBUG PANEL ============ */
 #pausebtn:hover{border-color:#c0392b;color:#fff}
 #volbtn{position:absolute;top:12px;right:48px;background:rgba(10,0,0,.8);border:1px solid #444;color:#aaa;font-size:15px;width:30px;height:30px;cursor:pointer;pointer-events:all;display:none;line-height:30px;text-align:center;transition:all .2s}
